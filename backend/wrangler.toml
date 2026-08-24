@@ -1,0 +1,47 @@
+name = "tilly-app-backend"
+type = "javascript"
+main = "dist/index.js"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Cloudflare account ID - replace with yours
+# account_id = "YOUR_ACCOUNT_ID"
+
+# Enable local development server
+workers_dev = true
+
+# Environment configuration
+[env.production]
+name = "tilly-app-backend-prod"
+route = "tilly-api.example.com/api/*"
+zone_id = "YOUR_ZONE_ID"
+
+# R2 bucket for file uploads (optional)
+[[r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "tilly-uploads"
+
+# Environment variables for production
+[env.production.vars]
+ENVIRONMENT = "production"
+LOG_LEVEL = "info"
+
+# Secrets (set via `wrangler secret put`)
+# SUPABASE_URL
+# SUPABASE_ANON_KEY
+# SUPABASE_SERVICE_ROLE_KEY
+# JWT_SECRET
+# CORS_ORIGIN
+
+# Build configuration
+[build]
+command = "npm install && npm run build"
+cwd = "./"
+
+# Triggers for scheduled tasks (optional)
+[[triggers.crons]]
+cron = "0 0 * * *"  # Daily at midnight
+
+# Analytics
+[analytics]
+enabled = true
