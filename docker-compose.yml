@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: tilly-postgres
+    environment:
+      POSTGRES_USER: tilly_user
+      POSTGRES_PASSWORD: tilly_secure_password
+      POSTGRES_DB: tilly_app
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/database:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tilly_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tilly-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: tilly-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tilly-network
+
+  # Node.js Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: tilly-backend
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      DATABASE_URL: postgresql://tilly_user:tilly_secure_password@postgres:5432/tilly_app
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: tilly_user
+      DB_PASSWORD: tilly_secure_password
+      DB_NAME: tilly_app
+      REDIS_URL: redis://redis:6379
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: your_super_secret_jwt_key_change_this_in_production
+      CORS_ORIGIN: "http://localhost:3000,http://localhost:8081,http://localhost:3001"
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/logs:/app/logs
+    networks:
+      - tilly-network
+    command: npm run dev
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  tilly-network:
+    driver: bridge
