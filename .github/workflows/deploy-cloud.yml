@@ -28,7 +28,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: 'backend/package-lock.json'
 
@@ -45,7 +45,6 @@ jobs:
           echo "${{ secrets.SUPABASE_URL }}" | npx wrangler secret put SUPABASE_URL --env production
           echo "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" | npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --env production
           echo "${{ secrets.JWT_SECRET }}" | npx wrangler secret put JWT_SECRET --env production
-          echo "${{ secrets.CORS_ORIGIN }}" | npx wrangler secret put CORS_ORIGIN --env production
 
       - name: Deploy to Cloudflare Workers
         working-directory: backend
