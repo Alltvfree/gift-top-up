@@ -1,29 +1,56 @@
-import { createClient } from '@supabase/supabase-js';
-import { logger } from './logger';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+// This module is imported by both the local Express server (src/index.ts)
+// and the Cloudflare Worker entrypoint (src/worker.ts). The Worker bundle
+// can't include Node-only modules, so this deliberately uses console.*
+// instead of the winston-based logger, which pulls in fs/os/etc.
+//
+// The Node/Express clients below are built lazily (on first use) rather
+// than at module load time. In the Workers runtime, merely importing this
+// file for its createSupabaseAdmin() factory evaluates this whole module -
+// eagerly calling createClient() here with an empty URL (process.env isn't
+// populated at Worker module-load time) throws and crashes the Worker
+// before any request handler runs, even though the Worker never touches
+// these exports.
 
-if (!supabaseUrl || !supabaseKey) {
-  logger.error('Supabase environment variables not set');
+let _supabaseClient: SupabaseClient | null = null;
+let _supabaseAdmin: SupabaseClient | null = null;
+
+/** User-scoped client (anon key) - Node/Express local dev only. */
+export function getSupabaseClient(): SupabaseClient {
+  if (!_supabaseClient) {
+    const url = process.env.SUPABASE_URL || '';
+    const key = process.env.SUPABASE_ANON_KEY || '';
+    if (!url || !key) {
+      console.error('Supabase environment variables not set (SUPABASE_URL / SUPABASE_ANON_KEY)');
+    }
+    _supabaseClient = createClient(url, key, { auth: { persistSession: false } });
+  }
+  return _supabaseClient;
 }
 
-// Client for user operations (uses anon key)
-export const supabaseClient = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: false,
-  },
-});
+/** Admin client (service role key) - Node/Express local dev only. */
+export function getSupabaseAdmin(): SupabaseClient {
+  if (!_supabaseAdmin) {
+    const url = process.env.SUPABASE_URL || '';
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+    _supabaseAdmin = serviceKey
+      ? createClient(url, serviceKey, { auth: { persistSession: false } })
+      : getSupabaseClient();
+  }
+  return _supabaseAdmin;
+}
 
-// Admin client for admin operations (uses service role key)
-export const supabaseAdmin = supabaseServiceKey
-  ? createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        persistSession: false,
-      },
-    })
-  : supabaseClient;
+/**
+ * Build a Supabase admin client from explicit credentials. Used by the
+ * Cloudflare Workers entrypoint, where secrets arrive per-request via
+ * env bindings rather than process.env.
+ */
+export function createSupabaseAdmin(url: string, serviceRoleKey: string): SupabaseClient {
+  return createClient(url, serviceRoleKey, {
+    auth: { persistSession: false },
+  });
+}
 
 /**
  * Initialize Supabase connection
@@ -31,89 +58,14 @@ export const supabaseAdmin = supabaseServiceKey
 export async function initializeSupabase(): Promise<void> {
   try {
     // Test connection by checking if we can access auth
-    const { data, error } = await supabaseClient.auth.getUser();
+    const { error } = await getSupabaseClient().auth.getUser();
     if (error && error.status !== 401) {
       // 401 is expected when not authenticated
       throw error;
     }
-    logger.info('✓ Supabase connected');
+    console.log('✓ Supabase connected');
   } catch (error) {
-    logger.error('Failed to connect to Supabase:', error);
-    throw error;
-  }
-}
-
-/**
- * Execute a query using Supabase
- * For simple queries, use the query builder
- * For complex queries, use RPC functions
- */
-export async function query(
-  table: string,
-  operation: 'select' | 'insert' | 'update' | 'delete',
-  data: any = {}
-): Promise<any> {
-  try {
-    let result: any;
-
-    switch (operation) {
-      case 'select':
-        result = await supabaseClient
-          .from(table)
-          .select(data.columns || '*')
-          .match(data.match || {})
-          .limit(data.limit || 100);
-        break;
-
-      case 'insert':
-        result = await supabaseClient
-          .from(table)
-          .insert(data.values);
-        break;
-
-      case 'update':
-        result = await supabaseClient
-          .from(table)
-          .update(data.values)
-          .match(data.match);
-        break;
-
-      case 'delete':
-        result = await supabaseClient
-          .from(table)
-          .delete()
-          .match(data.match);
-        break;
-    }
-
-    if (result.error) {
-      throw new Error(`Supabase error: ${result.error.message}`);
-    }
-
-    return result;
-  } catch (error) {
-    logger.error(`Database ${operation} error:`, error);
-    throw error;
-  }
-}
-
-/**
- * Call a Supabase RPC function
- */
-export async function callRpc(
-  functionName: string,
-  params: Record<string, any> = {}
-): Promise<any> {
-  try {
-    const { data, error } = await supabaseClient.rpc(functionName, params);
-
-    if (error) {
-      throw new Error(`RPC error: ${error.message}`);
-    }
-
-    return data;
-  } catch (error) {
-    logger.error(`RPC call error for ${functionName}:`, error);
+    console.error('Failed to connect to Supabase:', error);
     throw error;
   }
 }
@@ -121,53 +73,40 @@ export async function callRpc(
 /**
  * Get a user by ID
  */
-export async function getUser(userId: string): Promise<any> {
-  const { data, error } = await supabaseClient
-    .from('users')
-    .select('*')
-    .eq('id', userId)
-    .single();
-
+export async function getUser(db: SupabaseClient, userId: string): Promise<any> {
+  const { data, error } = await db.from('users').select('*').eq('id', userId).maybeSingle();
   if (error) throw error;
   return data;
 }
 
 /**
- * Get user by phone number
+ * Get user by phone number. Returns null when no user exists.
  */
-export async function getUserByPhone(phoneNumber: string): Promise<any> {
-  const { data, error } = await supabaseClient
+export async function getUserByPhone(db: SupabaseClient, phoneNumber: string): Promise<any> {
+  const { data, error } = await db
     .from('users')
     .select('*')
     .eq('phone_number', phoneNumber)
-    .single();
-
-  if (error && error.code === 'PGRST116') {
-    // Not found error
-    return null;
-  }
+    .maybeSingle();
 
   if (error) throw error;
   return data;
 }
 
 /**
- * Create a new user
+ * Create a new user. `id` is generated by the database default.
  */
-export async function createUser(userData: {
-  id: string;
-  phone_number: string;
-  email?: string;
-  first_name: string;
-  last_name: string;
-  password_hash: string;
-}): Promise<any> {
-  const { data, error } = await supabaseClient
-    .from('users')
-    .insert([userData])
-    .select()
-    .single();
-
+export async function createUser(
+  db: SupabaseClient,
+  userData: {
+    phone_number: string;
+    email?: string;
+    first_name: string;
+    last_name: string;
+    password_hash: string;
+  }
+): Promise<any> {
+  const { data, error } = await db.from('users').insert([userData]).select().single();
   if (error) throw error;
   return data;
 }
@@ -175,42 +114,37 @@ export async function createUser(userData: {
 /**
  * Get or create wallet for user
  */
-export async function getOrCreateWallet(userId: string): Promise<any> {
-  const { data, error } = await supabaseClient
+export async function getOrCreateWallet(db: SupabaseClient, userId: string): Promise<any> {
+  const { data, error } = await db
     .from('wallets')
     .select('*')
     .eq('user_id', userId)
-    .single();
-
-  if (error && error.code === 'PGRST116') {
-    // Wallet doesn't exist, create it
-    const { v4: uuidv4 } = require('uuid');
-    const { data: newWallet, error: createError } = await supabaseClient
-      .from('wallets')
-      .insert([
-        {
-          id: uuidv4(),
-          user_id: userId,
-          balance: 0,
-          currency: 'MVR',
-        },
-      ])
-      .select()
-      .single();
-
-    if (createError) throw createError;
-    return newWallet;
-  }
+    .maybeSingle();
 
   if (error) throw error;
-  return data;
+  if (data) return data;
+
+  const { data: newWallet, error: createError } = await db
+    .from('wallets')
+    .insert([
+      {
+        user_id: userId,
+        balance: 0,
+        currency: 'MVR',
+      },
+    ])
+    .select()
+    .single();
+
+  if (createError) throw createError;
+  return newWallet;
 }
 
 /**
  * Get wallet balance
  */
-export async function getWalletBalance(userId: string): Promise<number> {
-  const wallet = await getOrCreateWallet(userId);
+export async function getWalletBalance(db: SupabaseClient, userId: string): Promise<number> {
+  const wallet = await getOrCreateWallet(db, userId);
   return wallet?.balance || 0;
 }
 
@@ -218,24 +152,21 @@ export async function getWalletBalance(userId: string): Promise<number> {
  * Update wallet balance
  */
 export async function updateWalletBalance(
+  db: SupabaseClient,
   userId: string,
   amount: number,
   operation: 'add' | 'subtract'
 ): Promise<number> {
-  const wallet = await getOrCreateWallet(userId);
+  const wallet = await getOrCreateWallet(db, userId);
 
-  let newBalance: number;
-  if (operation === 'add') {
-    newBalance = (wallet.balance || 0) + amount;
-  } else {
-    newBalance = (wallet.balance || 0) - amount;
-  }
+  const newBalance =
+    operation === 'add' ? (wallet.balance || 0) + amount : (wallet.balance || 0) - amount;
 
   if (newBalance < 0) {
     throw new Error('Insufficient balance');
   }
 
-  const { data, error } = await supabaseClient
+  const { data, error } = await db
     .from('wallets')
     .update({ balance: newBalance })
     .eq('user_id', userId)
@@ -243,28 +174,28 @@ export async function updateWalletBalance(
     .single();
 
   if (error) throw error;
-  return newBalance;
+  return data.balance;
 }
 
 /**
  * Log transaction
  */
-export async function logTransaction(transaction: {
-  wallet_id: string;
-  type: string;
-  amount: number;
-  currency?: string;
-  status?: string;
-  description?: string;
-  reference_number?: string;
-}): Promise<any> {
-  const { v4: uuidv4 } = require('uuid');
-
-  const { data, error } = await supabaseClient
+export async function logTransaction(
+  db: SupabaseClient,
+  transaction: {
+    wallet_id: string;
+    type: string;
+    amount: number;
+    currency?: string;
+    status?: string;
+    description?: string;
+    reference_number?: string;
+  }
+): Promise<any> {
+  const { data, error } = await db
     .from('transactions')
     .insert([
       {
-        id: uuidv4(),
         ...transaction,
         currency: transaction.currency || 'MVR',
         status: transaction.status || 'COMPLETED',
@@ -278,11 +209,10 @@ export async function logTransaction(transaction: {
 }
 
 export default {
-  supabaseClient,
-  supabaseAdmin,
+  getSupabaseClient,
+  getSupabaseAdmin,
+  createSupabaseAdmin,
   initializeSupabase,
-  query,
-  callRpc,
   getUser,
   getUserByPhone,
   createUser,

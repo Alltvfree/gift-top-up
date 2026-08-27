@@ -20,7 +20,7 @@ app.use(cors({
   origin: process.env.CORS_ORIGIN?.split(',') || '*',
   credentials: true,
 }));
-app.use(morgan('combined', { stream: { write: (message) => logger.info(message) } }));
+app.use(morgan('combined', { stream: { write: (message: string) => logger.info(message) } }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

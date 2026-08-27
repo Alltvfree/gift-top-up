@@ -8,6 +8,9 @@ node_modules/
 .env.local
 .env.*.local
 .env.cloud
+.dev.vars
+.dev.vars.*
+.wrangler/
 
 # Build outputs
 frontend/web-build/

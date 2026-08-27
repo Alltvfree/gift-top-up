@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { apiClient } from '../services/api';
 
 interface User {
   id: string;
@@ -10,6 +11,14 @@ interface User {
   kycStatus: string;
 }
 
+interface RegisterData {
+  firstName: string;
+  lastName: string;
+  phoneNumber: string;
+  email?: string;
+  password: string;
+}
+
 interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
@@ -18,10 +27,14 @@ interface AuthState {
 
   // Actions
   login: (phoneNumber: string, password: string) => Promise<void>;
-  register: (data: any) => Promise<void>;
+  register: (data: RegisterData) => Promise<void>;
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
   setUser: (user: User) => void;
+}
+
+function extractErrorMessage(error: any, fallback: string): string {
+  return error?.response?.data?.error?.message || error?.message || fallback;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -33,30 +46,34 @@ export const useAuthStore = create<AuthState>((set) => ({
   login: async (phoneNumber: string, password: string) => {
     try {
       set({ isLoading: true });
-      // TODO: Implement API call
-      // const response = await apiClient.post('/auth/login', { phoneNumber, password });
-      // await AsyncStorage.setItem('authToken', response.data.token);
-      // set({
-      //   isAuthenticated: true,
-      //   token: response.data.token,
-      //   user: response.data.user,
-      // });
+      const response = await apiClient.login(phoneNumber, password);
+      const { token, user } = response.data;
+      await AsyncStorage.setItem('authToken', token);
+      set({
+        isAuthenticated: true,
+        token,
+        user,
+      });
+    } catch (error: any) {
+      throw new Error(extractErrorMessage(error, 'Login failed. Please try again.'));
     } finally {
       set({ isLoading: false });
     }
   },
 
-  register: async (data: any) => {
+  register: async (data: RegisterData) => {
     try {
       set({ isLoading: true });
-      // TODO: Implement API call
-      // const response = await apiClient.post('/auth/register', data);
-      // await AsyncStorage.setItem('authToken', response.data.token);
-      // set({
-      //   isAuthenticated: true,
-      //   token: response.data.token,
-      //   user: response.data.user,
-      // });
+      const response = await apiClient.register(data);
+      const { token, user } = response.data;
+      await AsyncStorage.setItem('authToken', token);
+      set({
+        isAuthenticated: true,
+        token,
+        user,
+      });
+    } catch (error: any) {
+      throw new Error(extractErrorMessage(error, 'Registration failed. Please try again.'));
     } finally {
       set({ isLoading: false });
     }
@@ -64,16 +81,16 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   logout: async () => {
     try {
-      // TODO: Implement API call to logout
-      // await apiClient.post('/auth/logout');
+      await apiClient.logout();
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
       await AsyncStorage.removeItem('authToken');
       set({
         isAuthenticated: false,
         token: null,
         user: null,
       });
-    } catch (error) {
-      console.error('Logout error:', error);
     }
   },
 
@@ -82,13 +99,12 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ isLoading: true });
       const token = await AsyncStorage.getItem('authToken');
       if (token) {
-        // TODO: Verify token with API
-        // const response = await apiClient.get('/users/profile');
-        // set({
-        //   isAuthenticated: true,
-        //   token,
-        //   user: response.data,
-        // });
+        const response = await apiClient.getProfile();
+        set({
+          isAuthenticated: true,
+          token,
+          user: response.data,
+        });
       } else {
         set({
           isAuthenticated: false,
@@ -96,6 +112,15 @@ export const useAuthStore = create<AuthState>((set) => ({
           user: null,
         });
       }
+    } catch (error) {
+      // Token invalid/expired or profile endpoint unavailable - fall back
+      // to a logged-out state rather than getting stuck loading forever.
+      await AsyncStorage.removeItem('authToken');
+      set({
+        isAuthenticated: false,
+        token: null,
+        user: null,
+      });
     } finally {
       set({ isLoading: false });
     }

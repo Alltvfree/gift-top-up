@@ -1,22 +1,36 @@
 import express from 'express';
 import { logger } from '../config/logger';
+import { getSupabaseAdmin } from '../config/supabase';
+import { AuthError, loginUser, registerUser } from '../services/authService';
 
 const router = express.Router();
 
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+
 // Register user
-router.post('/register', (req, res) => {
-  logger.info('POST /auth/register');
-  res.status(200).json({
-    message: 'User registration - to be implemented',
-  });
+router.post('/register', async (req, res) => {
+  try {
+    const result = await registerUser(getSupabaseAdmin(), JWT_SECRET, req.body);
+    logger.info(`User registered: ${result.user.phoneNumber}`);
+    res.status(201).json(result);
+  } catch (error: any) {
+    const status = error instanceof AuthError ? error.status : 500;
+    if (status === 500) logger.error('Register error:', error);
+    res.status(status).json({ error: { message: error.message || 'Registration failed', status } });
+  }
 });
 
 // Login user
-router.post('/login', (req, res) => {
-  logger.info('POST /auth/login');
-  res.status(200).json({
-    message: 'User login - to be implemented',
-  });
+router.post('/login', async (req, res) => {
+  try {
+    const result = await loginUser(getSupabaseAdmin(), JWT_SECRET, req.body);
+    logger.info(`User logged in: ${result.user.phoneNumber}`);
+    res.status(200).json(result);
+  } catch (error: any) {
+    const status = error instanceof AuthError ? error.status : 500;
+    if (status === 500) logger.error('Login error:', error);
+    res.status(status).json({ error: { message: error.message || 'Login failed', status } });
+  }
 });
 
 // Refresh token
@@ -30,9 +44,7 @@ router.post('/refresh', (req, res) => {
 // Logout
 router.post('/logout', (req, res) => {
   logger.info('POST /auth/logout');
-  res.status(200).json({
-    message: 'User logout - to be implemented',
-  });
+  res.status(200).json({ message: 'Logged out' });
 });
 
 export default router;

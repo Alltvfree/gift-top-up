@@ -10,7 +10,7 @@ const pool = new Pool({
 });
 
 // Connection event handlers
-pool.on('error', (err) => {
+pool.on('error', (err: Error) => {
   logger.error('Unexpected error on idle client', err);
 });
 
