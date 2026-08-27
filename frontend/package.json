@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "expo start",
     "web": "expo start --web",
-    "build": "expo build:web",
+    "build": "expo export:web",
     "test": "jest",
     "lint": "eslint src --ext .ts,.tsx",
     "format": "prettier --write src"
