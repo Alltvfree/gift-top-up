@@ -29,7 +29,15 @@ app.get('/health', (c) =>
   c.json({ status: 'OK', timestamp: new Date().toISOString() })
 );
 
-app.post('/api/v1/auth/register', async (c) => {
+// All the actual API routes are defined on this sub-router, relative to
+// its own root, then mounted at two different base paths below. This
+// makes the Worker tolerant of EXPO_PUBLIC_API_URL being configured
+// either as ".../api/v1" or without that suffix - a very easy mismatch
+// to introduce via a dashboard text field, and one that otherwise fails
+// as a silent-looking 404 with no indication of which side is wrong.
+const routes = new Hono<{ Bindings: Bindings }>();
+
+routes.post('/auth/register', async (c) => {
   try {
     const body = await c.req.json();
     const db = createSupabaseAdmin(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -42,7 +50,7 @@ app.post('/api/v1/auth/register', async (c) => {
   }
 });
 
-app.post('/api/v1/auth/login', async (c) => {
+routes.post('/auth/login', async (c) => {
   try {
     const body = await c.req.json();
     const db = createSupabaseAdmin(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -55,13 +63,13 @@ app.post('/api/v1/auth/login', async (c) => {
   }
 });
 
-app.post('/api/v1/auth/refresh', (c) =>
+routes.post('/auth/refresh', (c) =>
   c.json({ message: 'Token refresh - to be implemented' })
 );
 
-app.post('/api/v1/auth/logout', (c) => c.json({ message: 'Logged out' }));
+routes.post('/auth/logout', (c) => c.json({ message: 'Logged out' }));
 
-app.get('/api/v1/users/profile', async (c) => {
+routes.get('/users/profile', async (c) => {
   try {
     const db = createSupabaseAdmin(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_ROLE_KEY);
     const profile = await getProfile(db, c.env.JWT_SECRET, c.req.header('Authorization'));
@@ -73,7 +81,20 @@ app.get('/api/v1/users/profile', async (c) => {
   }
 });
 
-app.notFound((c) => c.json({ error: { message: 'Route not found', status: 404 } }, 404));
+app.route('/api/v1', routes);
+app.route('/', routes);
+
+app.notFound((c) =>
+  c.json(
+    {
+      error: {
+        message: `Route not found: ${c.req.method} ${new URL(c.req.url).pathname}`,
+        status: 404,
+      },
+    },
+    404
+  )
+);
 
 app.onError((err, c) => {
   console.error('Unhandled worker error:', err);
