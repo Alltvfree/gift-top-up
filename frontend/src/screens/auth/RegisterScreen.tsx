@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Alert,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuthStore } from '../../stores/authStore';
@@ -23,21 +22,28 @@ export default function RegisterScreen({ navigation }: RegisterScreenProps) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [loading, setLoading] = useState(false);
+  // Rendered on-screen instead of using Alert.alert(), which is
+  // unreliable on React Native Web - it can silently no-op in the
+  // browser instead of showing a popup, which looked exactly like
+  // "nothing happens" when a field was missing or the request failed.
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { register } = useAuthStore();
 
   const handleRegister = async () => {
+    setErrorMessage(null);
+
     if (!firstName || !lastName || !phoneNumber || !email || !password || !confirmPassword) {
-      Alert.alert('Error', 'Please fill in all fields');
+      setErrorMessage('Please fill in all fields');
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
+      setErrorMessage('Passwords do not match');
       return;
     }
 
     if (!agreeTerms) {
-      Alert.alert('Error', 'Please accept terms and conditions');
+      setErrorMessage('Please accept terms and conditions');
       return;
     }
 
@@ -51,7 +57,7 @@ export default function RegisterScreen({ navigation }: RegisterScreenProps) {
         password,
       });
     } catch (error: any) {
-      Alert.alert('Registration Failed', error.message || 'Please try again');
+      setErrorMessage(error.message || 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -69,6 +75,12 @@ export default function RegisterScreen({ navigation }: RegisterScreenProps) {
 
       {/* Form */}
       <View style={styles.form}>
+        {errorMessage && (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorBannerText}>{errorMessage}</Text>
+          </View>
+        )}
+
         {/* First Name */}
         <View style={styles.inputGroup}>
           <Text style={styles.label}>First Name</Text>
@@ -212,6 +224,18 @@ const styles = StyleSheet.create({
   form: {
     paddingHorizontal: 16,
     paddingBottom: 32,
+  },
+  errorBanner: {
+    backgroundColor: '#FDECEA',
+    borderWidth: 1,
+    borderColor: '#F5C2C0',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  errorBannerText: {
+    color: '#B3261E',
+    fontSize: 14,
   },
   inputGroup: {
     marginBottom: 16,

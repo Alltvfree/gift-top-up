@@ -33,8 +33,24 @@ interface AuthState {
   setUser: (user: User) => void;
 }
 
+// Builds a self-sufficient error message (no DevTools needed to see what
+// actually happened): what the server said, the HTTP status, and the
+// exact URL that was called - or, if the request never reached the
+// server at all, the underlying network error.
 function extractErrorMessage(error: any, fallback: string): string {
-  return error?.response?.data?.error?.message || error?.message || fallback;
+  const method = error?.config?.method?.toUpperCase();
+  const url = error?.config?.baseURL
+    ? `${error.config.baseURL}${error.config.url}`
+    : error?.config?.url;
+  const status = error?.response?.status;
+  const serverMessage = error?.response?.data?.error?.message;
+
+  const parts: string[] = [];
+  parts.push(serverMessage || error?.message || fallback);
+  if (status) parts.push(`(HTTP ${status})`);
+  if (method && url) parts.push(`[${method} ${url}]`);
+
+  return parts.join(' ');
 }
 
 export const useAuthStore = create<AuthState>((set) => ({

@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Alert,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuthStore } from '../../stores/authStore';
@@ -18,11 +17,17 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  // Rendered on-screen instead of using Alert.alert(), which is
+  // unreliable on React Native Web - it can silently no-op in the
+  // browser instead of showing a popup.
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { login } = useAuthStore();
 
   const handleLogin = async () => {
+    setErrorMessage(null);
+
     if (!phoneNumber || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+      setErrorMessage('Please fill in all fields');
       return;
     }
 
@@ -30,7 +35,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
       setLoading(true);
       await login(phoneNumber, password);
     } catch (error: any) {
-      Alert.alert('Login Failed', error.message || 'Please try again');
+      setErrorMessage(error.message || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -48,6 +53,12 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
       <View style={styles.form}>
         <Text style={styles.title}>Welcome Back</Text>
         <Text style={styles.description}>Sign in to your Tilly account</Text>
+
+        {errorMessage && (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorBannerText}>{errorMessage}</Text>
+          </View>
+        )}
 
         {/* Phone Number Input */}
         <View style={styles.inputGroup}>
@@ -158,6 +169,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999',
     marginBottom: 24,
+  },
+  errorBanner: {
+    backgroundColor: '#FDECEA',
+    borderWidth: 1,
+    borderColor: '#F5C2C0',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  errorBannerText: {
+    color: '#B3261E',
+    fontSize: 14,
   },
   inputGroup: {
     marginBottom: 20,
