@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/stack';
+import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import * as SplashScreen from 'expo-splash-screen';
 
@@ -31,10 +32,10 @@ export type MainTabParamList = {
   Profile: undefined;
 };
 
-const Stack = createNativeStackNavigator<RootStackParamList>();
+const Stack = createStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
-keep SplashScreen.preventAutoHideAsync();
+SplashScreen.preventAutoHideAsync();
 
 function AuthStack() {
   return (
@@ -108,15 +109,14 @@ function MainTabNavigator() {
 }
 
 export default function App() {
-  const { isAuthenticated, isLoading } = useAuthStore();
+  const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
   const [appIsReady, setAppIsReady] = useState(false);
 
   useEffect(() => {
     async function prepare() {
       try {
-        // Initialize app
         // Load cached auth state
-        // etc...
+        await checkAuth();
       } catch (e) {
         console.warn(e);
       } finally {
@@ -163,5 +163,3 @@ const WalletIcon = ({ color }: { color: string }) => <Text style={{ color }}>�
 const PhoneIcon = ({ color }: { color: string }) => <Text style={{ color }}>📱</Text>;
 const BillIcon = ({ color }: { color: string }) => <Text style={{ color }}>📄</Text>;
 const ProfileIcon = ({ color }: { color: string }) => <Text style={{ color }}>👤</Text>;
-
-import { Text } from 'react-native';

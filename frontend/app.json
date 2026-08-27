@@ -16,10 +16,8 @@
       "package": "com.tilly.app"
     },
     "web": {
-      "favicon": "./assets/favicon.png",
       "display": "standalone",
-      "orientation": "portrait",
-      "bundler": "metro"
+      "orientation": "portrait"
     },
     "scheme": "tilly"
   }
