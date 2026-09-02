@@ -93,6 +93,20 @@ class TimeframesConfig(BaseModel):
     entry: str = "M5"
 
 
+class ScoreWeights(BaseModel):
+    """Weights for the signal score. Should sum to 100 for interpretability."""
+
+    trend: float = Field(30.0, ge=0)
+    structure: float = Field(25.0, ge=0)
+    pullback: float = Field(20.0, ge=0)
+    momentum: float = Field(15.0, ge=0)
+    rsi: float = Field(10.0, ge=0)
+
+    @property
+    def total(self) -> float:
+        return self.trend + self.structure + self.pullback + self.momentum + self.rsi
+
+
 class StrategyConfig(BaseModel):
     name: str = "XAUUSD_TrendPullback_v1"
     version: str = "1.0.0"
@@ -103,7 +117,21 @@ class StrategyConfig(BaseModel):
     rsi_period: int = Field(14, gt=0)
     rsi_buy_threshold: float = 50.0
     rsi_sell_threshold: float = 50.0
+    rsi_overbought: float = Field(75.0, gt=0, le=100)
+    rsi_oversold: float = Field(25.0, ge=0, lt=100)
     atr_period: int = Field(14, gt=0)
+
+    # --- Setup / entry thresholds (all configurable) ---
+    # How close price must come to EMA-fast (in ATR multiples) to count as a
+    # valid pullback.
+    pullback_atr_mult: float = Field(1.0, gt=0)
+    # How many bars back to inspect for higher-low / lower-high structure.
+    structure_lookback: int = Field(10, ge=3)
+    # Volatility gate on the setup timeframe (ATR in price terms). 0 disables.
+    min_atr: float = Field(0.0, ge=0)
+    max_atr: float = Field(0.0, ge=0)
+
+    weights: ScoreWeights = Field(default_factory=ScoreWeights)
 
     @field_validator("ema_slow")
     @classmethod

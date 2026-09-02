@@ -21,6 +21,9 @@ from app.core.models import Timeframe
 from app.indicators.indicators import atr, ema, rsi
 from app.mt5.factory import create_adapter
 from app.mt5.market_data import MarketDataService
+from app.risk.risk_manager import RiskManager
+from app.strategies.base import StrategyInput
+from app.strategies.factory import create_strategy
 
 
 def run() -> int:
@@ -86,6 +89,43 @@ def run() -> int:
             ema_slow=round(float(ema_slow), info.digits),
             rsi=round(float(rsi_val), 2),
             atr=round(float(atr_val), info.digits),
+        )
+
+    # --- Phase 2: evaluate one signal and run it through the risk gate --------
+    strategy = create_strategy(config)
+    risk_manager = RiskManager(config.risk)
+    strat_input = StrategyInput(
+        symbol_info=info,
+        trend_df=market.get_ohlc_frame(Timeframe(config.timeframes.trend), 300),
+        setup_df=market.get_ohlc_frame(Timeframe(config.timeframes.setup), 200),
+        entry_df=market.get_ohlc_frame(Timeframe(config.timeframes.entry), 200),
+        tick=tick,
+        spread_points=market.get_spread_points(),
+    )
+    signal = strategy.evaluate(strat_input)
+    log_event(
+        log,
+        "SIGNAL_GENERATED",
+        signal.reason,
+        direction=signal.direction.value,
+        score=signal.score,
+        components=signal.components,
+    )
+    if signal.is_actionable:
+        decision = risk_manager.evaluate(
+            signal, account, info,
+            spread_points=strat_input.spread_points,
+            open_positions=len(adapter.get_positions(info.name)),
+        )
+        log_event(
+            log,
+            "RISK_DECISION",
+            decision.reason,
+            approved=decision.approved,
+            lot_size=decision.lot_size,
+            entry=signal.entry,
+            sl=signal.stop_loss,
+            tp=signal.take_profit,
         )
 
     adapter.disconnect()

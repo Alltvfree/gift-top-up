@@ -37,7 +37,23 @@ strategy:
   rsi_period: 14
   rsi_buy_threshold: 50
   rsi_sell_threshold: 50
+  rsi_overbought: 75
+  rsi_oversold: 25
   atr_period: 14
+
+  # Setup / entry thresholds (all configurable)
+  pullback_atr_mult: 1.0      # max distance to EMA-fast (in ATRs) for a pullback
+  structure_lookback: 10      # bars inspected for higher-low / lower-high
+  min_atr: 0.0                # volatility gate (price units); 0 disables
+  max_atr: 0.0                # 0 disables
+
+  # Signal score weights (sum to 100)
+  weights:
+    trend: 30
+    structure: 25
+    pullback: 20
+    momentum: 15
+    rsi: 10
 
 # --- Risk management ---------------------------------------------------------
 risk:

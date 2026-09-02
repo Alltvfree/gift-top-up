@@ -52,6 +52,57 @@ class OrderSide(str, Enum):
     SELL = "SELL"
 
 
+class SignalType(str, Enum):
+    """A strategy's decision for the current bar."""
+
+    BUY = "BUY"
+    SELL = "SELL"
+    WAIT = "WAIT"
+
+    def to_side(self) -> "OrderSide":
+        if self is SignalType.BUY:
+            return OrderSide.BUY
+        if self is SignalType.SELL:
+            return OrderSide.SELL
+        raise ValueError("WAIT has no order side")
+
+
+class TrendState(str, Enum):
+    BULLISH = "BULLISH"
+    BEARISH = "BEARISH"
+    NO_TREND = "NO_TREND"
+
+
+@dataclass(frozen=True)
+class Signal:
+    """A fully-explained strategy signal.
+
+    Always produced (WAIT included) so every evaluated bar is auditable. Prices
+    are ``None`` for WAIT signals.
+    """
+
+    signal_id: str
+    timestamp: datetime
+    symbol: str
+    direction: SignalType
+    score: float
+    strategy: str
+    strategy_version: str
+    entry: Optional[float] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    risk_reward: Optional[float] = None
+    reason: str = ""
+    # Per-component score contributions, e.g. {"trend": 30, "structure": 25}.
+    components: dict = field(default_factory=dict)
+    # Raw indicator values used, e.g. {"ema_fast": ..., "rsi": ...}.
+    indicators: dict = field(default_factory=dict)
+
+    @property
+    def is_actionable(self) -> bool:
+        return self.direction in (SignalType.BUY, SignalType.SELL)
+
+
 @dataclass(frozen=True)
 class SymbolInfo:
     """Static/dynamic properties of a tradable symbol.

@@ -20,7 +20,7 @@ complete and tested.**
 | Phase | Scope | Status |
 |------:|-------|--------|
 | **1** | Project structure, config, logging, MT5 connection abstraction, XAUUSD symbol detection, market data, indicators (EMA/RSI/ATR), tests | ✅ Done |
-| 2 | Strategy engine, BUY/SELL/WAIT signals, scoring, SL/TP, risk engine | ⏳ Planned |
+| **2** | Strategy engine, BUY/SELL/WAIT signals, 0-100 scoring, ATR SL/TP, position sizing + per-trade risk gates | ✅ Done |
 | 3 | Paper trading, order execution, duplicate protection, position management, break-even, trailing stop, daily limits | ⏳ Planned |
 | 4 | Historical backtester, metrics, equity/drawdown curves | ⏳ Planned |
 | 5 | Optimization, walk-forward, overfitting detection | ⏳ Planned |
@@ -55,16 +55,45 @@ real terminal for DEMO/LIVE without touching strategy or risk code.
 xauusd-bot/
 ├── backend/
 │   ├── app/
-│   │   ├── core/          # config, logging, domain models
+│   │   ├── core/          # config, logging, domain models (incl. Signal)
 │   │   ├── indicators/    # EMA, RSI, ATR
 │   │   ├── mt5/           # adapter interface, mock + real adapters, market data
-│   │   └── main.py        # Phase 1 foundation smoke check
+│   │   ├── strategies/    # Strategy interface + XAUUSD_TrendPullback_v1
+│   │   ├── risk/          # SL/TP, position sizing, risk manager
+│   │   └── main.py        # foundation + signal/risk smoke check
 │   └── tests/             # pytest suite
 ├── config/config.yaml     # strategy / risk parameters (no secrets)
 ├── .env.example           # environment template (copy to .env)
 ├── requirements.txt
 └── pytest.ini
 ```
+
+### Strategy — `XAUUSD_TrendPullback_v1` (Phase 2)
+
+A modular, fully-configurable trend-pullback strategy. Every parameter lives in
+`config.yaml`; nothing is hard-coded in the engine.
+
+* **H1 trend bias** — `EMA50 vs EMA200` + price vs `EMA50` → BULLISH / BEARISH /
+  NO_TREND. No trade unless the higher-timeframe trend is clear.
+* **M15 setup** — higher-low / lower-high structure + a pullback toward EMA-fast
+  (within a configurable ATR distance), with a volatility (ATR) gate.
+* **M5 entry** — candle + short-EMA momentum and an RSI band check.
+* **Score (0-100)** — weighted `trend 30 / structure 25 / pullback 20 /
+  momentum 15 / rsi 10`; a trade is proposed only when
+  `score >= min_score` **and** spread is acceptable.
+* **Output** — every evaluated bar yields a fully-explained `Signal`
+  (BUY/SELL/WAIT) with entry, ATR-based SL, RR-based TP, per-component score
+  breakdown, indicator values, a human-readable reason, and a unique signal id.
+
+**Risk engine.** ATR-scaled stop-loss (never a fixed dollar value), risk/reward
+take-profit, and percentage-of-equity position sizing that clamps to the
+broker's lot rules and **rounds down** so the configured risk % is never
+exceeded. The `RiskManager` is the single gate every actionable signal must pass
+(actionable + has SL, spread OK, position count OK, sizable within budget).
+
+> These thresholds are a configurable starting point, **not** proven-profitable
+> settings — see the safety principles below. Stateful protections (daily loss,
+> drawdown, cooldown, max-daily-trades, emergency stop) arrive in Phase 3.
 
 ---
 
