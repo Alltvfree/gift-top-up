@@ -25,7 +25,10 @@ complete and tested.**
 | **4** | Historical backtester (no look-ahead), full metrics, equity/drawdown curves, monthly/daily breakdowns, trading sessions, JSON/CSV reports | ✅ Done |
 | **5** | Grid/random optimization, walk-forward (train/validation/OOS), overfitting detection (ROBUST/WARNING/HIGH RISK) | ✅ Done |
 | **6** | FastAPI backend (all endpoints), WebSocket live updates, dark trading dashboard | ✅ Done |
-| 7 | End-to-end integration (bot runner, Docker) | ⏳ Planned |
+| **7** | End-to-end integration: headless bot runner, Docker/compose, full-stack E2E test | ✅ Done |
+
+**All 7 phases are complete.** 137 tests pass; everything except real
+DEMO/LIVE order routing runs natively on Ubuntu with no MT5 terminal.
 
 ---
 
@@ -67,6 +70,9 @@ xauusd-bot/
 │   │   └── main.py        # runs one engine iteration (evaluate→risk→execute)
 │   └── tests/             # pytest suite
 ├── frontend/index.html    # dark trading dashboard (no build step)
+├── scripts/               # run_backtest / run_optimization / run_bot
+├── docker/Dockerfile      # API/dashboard image
+├── docker-compose.yml     # local stack (PAPER by default)
 ├── config/config.yaml     # strategy / risk parameters (no secrets)
 ├── .env.example           # environment template (copy to .env)
 ├── requirements.txt
@@ -220,6 +226,83 @@ a warning banner and requires typing the confirmation phrase before starting.
 > **Dashboard note:** this is a served single-page app (vanilla JS + WebSocket),
 > chosen so it runs on a headless Ubuntu server with **zero npm/build step**. A
 > React/Next.js version can consume the same API unchanged.
+
+### Integration & deployment (Phase 7)
+
+**Headless runner** (no dashboard) — runs the engine loop directly:
+
+```bash
+cd xauusd-bot
+python scripts/run_bot.py               # PAPER, ticks every 5s
+BOT_TICK_SECONDS=2 python scripts/run_bot.py
+```
+
+**Docker** — API + dashboard, PAPER by default:
+
+```bash
+cd xauusd-bot
+cp .env.example .env
+docker compose up --build               # -> http://localhost:8000
+```
+
+The image is Linux, so it runs PAPER/BACKTEST out of the box. For DEMO/LIVE,
+run the `mt5linux` Wine bridge on the host and set `MT5_USE_LINUX_BRIDGE=true`
+plus `MT5_BRIDGE_HOST=host.docker.internal` in `.env`.
+
+---
+
+## ⚠️ Enabling LIVE trading — read this
+
+```
+WARNING
+
+Automated trading can lose money.
+Past backtest performance does not guarantee future results.
+
+LIVE TRADING requires explicit confirmation.
+```
+
+LIVE is gated three ways, on purpose:
+
+1. `TRADING_MODE=LIVE` **and** `BOT_ALLOW_LIVE=true` in `.env` (the app refuses
+   to start LIVE without the second flag).
+2. Starting the bot via the API/dashboard requires the phrase
+   `ENABLE LIVE TRADING` (the dashboard prompts for it and shows a warning
+   banner); the headless runner requires `RUN_BOT_CONFIRM_LIVE='ENABLE LIVE
+   TRADING'`.
+3. The emergency stop is always available and persists across restarts.
+
+**Do not enable LIVE until you have:** run a meaningful backtest on *real*
+historical data, validated out-of-sample and via walk-forward (checking the
+overfitting grade), and forward-tested on a **demo** account. The bundled
+strategy parameters are a starting point, not proven-profitable settings.
+
+---
+
+## Final deliverables checklist
+
+| # | Deliverable | Where |
+|---|-------------|-------|
+| 1 | Complete source code | `backend/app/`, `frontend/` |
+| 2 | MT5 integration (real + mock, Ubuntu bridge) | `app/mt5/` |
+| 3 | Trading strategy (`XAUUSD_TrendPullback_v1`) | `app/strategies/` |
+| 4 | Risk engine (sizing, SL/TP, governor, sessions) | `app/risk/` |
+| 5 | Paper trading + execution engine | `app/execution/` |
+| 6 | Backtesting engine + metrics + reports | `app/backtesting/` |
+| 7 | Optimization + walk-forward + overfitting | `app/optimization/` |
+| 8 | Operational state persistence (JSON) | `app/core/state.py` |
+| 9 | FastAPI backend | `app/api/` |
+| 10 | Web dashboard | `frontend/index.html` |
+| 11 | Docker configuration | `docker/`, `docker-compose.yml` |
+| 12 | `.env.example` | `./.env.example` |
+| 13 | Automated tests (137) | `backend/tests/` |
+| 14–18 | README + install / MT5 / backtest / demo instructions | this file |
+
+> **Scope note:** operational state (emergency stop, daily counters, candle
+> dedup, open-trade metadata) uses an atomic JSON store — enough to run and
+> restart safely with no external database. A PostgreSQL history layer for
+> long-term trade/equity records is scaffolded in `docker-compose.yml`
+> (commented) and is the one spec item intentionally left as an optional add-on.
 
 ---
 

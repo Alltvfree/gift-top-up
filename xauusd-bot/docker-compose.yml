@@ -1,0 +1,39 @@
+# XAUUSD MT5 Trading Bot — local stack.
+#
+# Runs the API + dashboard in PAPER mode by default. Credentials come from .env
+# (never commit it). For DEMO/LIVE, run the mt5linux Wine bridge on the host and
+# set MT5_USE_LINUX_BRIDGE=true + MT5_BRIDGE_HOST=host.docker.internal in .env.
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: xauusd-bot:latest
+    container_name: xauusd-bot
+    env_file:
+      - .env
+    environment:
+      # Safe default; override in .env if you know what you are doing.
+      TRADING_MODE: ${TRADING_MODE:-PAPER}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  # --- Optional: PostgreSQL for trade/equity history (not required to run) ---
+  # db:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_USER: bot
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+  #     POSTGRES_DB: xauusd_bot
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+
+# volumes:
+#   pgdata:

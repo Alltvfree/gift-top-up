@@ -37,6 +37,7 @@ class BotService:
         config: Optional[BotConfig] = None,
         *,
         state_path: str = "data/bot_state.json",
+        adapter=None,
     ) -> None:
         self.settings = settings or load_settings()
         self.config = config or load_config()
@@ -45,7 +46,9 @@ class BotService:
         self._lock = threading.Lock()
         self.running = False
 
-        self.adapter = create_adapter(self.settings)
+        # `adapter` may be injected (tests / custom feeds); otherwise built from
+        # the trading mode.
+        self.adapter = adapter or create_adapter(self.settings)
         status = self.adapter.connect()
         self.connected = status.connected
 
