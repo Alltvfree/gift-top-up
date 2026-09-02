@@ -1,0 +1,89 @@
+# =============================================================================
+# XAUUSD MT5 Trading Bot — configuration
+# =============================================================================
+# Credentials are NEVER stored here — see .env / .env.example.
+# All strategy/risk parameters are configurable; the values below are STARTING
+# POINTS ONLY and must not be treated as proven-profitable settings.
+# =============================================================================
+
+# --- Instrument --------------------------------------------------------------
+symbol: XAUUSD
+# Broker-specific aliases auto-detected when the exact symbol is unavailable.
+symbol_aliases:
+  - XAUUSD
+  - XAUUSDm
+  - XAUUSD.a
+  - XAUUSD.
+  - GOLD
+  - GOLD.a
+
+# --- Timeframes --------------------------------------------------------------
+timeframes:
+  trend: H1        # higher-timeframe bias
+  setup: M15       # market structure / setup
+  entry: M5        # entry confirmation
+
+# --- Strategy ----------------------------------------------------------------
+strategy:
+  name: XAUUSD_TrendPullback_v1
+  version: "1.0.0"
+  min_score: 75
+
+  # Indicator parameters (Phase 1 implements the calculations; the strategy
+  # engine that consumes them arrives in Phase 2).
+  ema_fast: 50
+  ema_slow: 200
+  ema_short: 20      # short EMA used on the entry timeframe
+  rsi_period: 14
+  rsi_buy_threshold: 50
+  rsi_sell_threshold: 50
+  atr_period: 14
+
+# --- Risk management ---------------------------------------------------------
+risk:
+  risk_per_trade: 1.0     # percent of equity risked per trade
+  max_daily_loss: 3.0     # percent
+  max_drawdown: 10.0      # percent
+  max_daily_trades: 5
+  max_positions: 1
+  max_spread_points: 50   # reject entries above this spread (broker points)
+  cooldown_minutes: 15
+
+# --- Stop loss (ATR-based) ---------------------------------------------------
+stop_loss:
+  atr_period: 14
+  atr_multiplier: 1.5
+
+# --- Take profit -------------------------------------------------------------
+take_profit:
+  risk_reward: 2.0        # 1:2 default
+
+# --- Break-even --------------------------------------------------------------
+break_even:
+  enabled: true
+  trigger_r: 1.0          # move SL to break-even at +1R
+  buffer_points: 5
+
+# --- Trailing stop -----------------------------------------------------------
+trailing_stop:
+  enabled: true
+  atr_multiplier: 1.5
+
+# --- Trading sessions --------------------------------------------------------
+trading_sessions:
+  enabled: true
+  timezone: UTC
+  # Preset: london | new_york | overlap | custom | all_day
+  preset: overlap
+
+# --- News filter -------------------------------------------------------------
+news_filter:
+  enabled: false
+  minutes_before: 30
+  minutes_after: 30
+
+# --- Mode --------------------------------------------------------------------
+# The authoritative trading mode comes from the TRADING_MODE env var; this is a
+# documentation mirror of the default.
+mode:
+  default: PAPER

@@ -1,0 +1,25 @@
+# XAUUSD MT5 Trading Bot — dependencies
+#
+# NOTE: `MetaTrader5` is Windows-only and is intentionally NOT pinned as a hard
+# dependency so the codebase (and its test suite) can run on any platform via the
+# mock adapter. Install it separately on a Windows host that runs the live/demo
+# bot:  pip install MetaTrader5
+
+# --- Phase 1 (foundation) ---
+numpy>=1.26
+pandas>=2.1
+pydantic>=2.5
+pydantic-settings>=2.1
+PyYAML>=6.0
+python-dotenv>=1.0
+
+# --- Testing ---
+pytest>=7.4
+pytest-cov>=4.1
+
+# --- Later phases (API / dashboard backend) — uncomment as they are built ---
+# fastapi>=0.110
+# uvicorn[standard]>=0.27
+# SQLAlchemy>=2.0
+# psycopg2-binary>=2.9
+# websockets>=12.0
