@@ -128,15 +128,77 @@ Expected output is a series of structured log lines
 
 ---
 
-## MT5 setup (for DEMO/LIVE, Phase 3+)
+## Platform support — important
 
-1. Install the MetaTrader 5 terminal and log in to a **demo** account first.
-2. In the terminal: *Tools → Options → Expert Advisors* → enable *Allow
-   algorithmic trading*.
-3. `pip install MetaTrader5` in the same Python environment.
-4. Set `TRADING_MODE=DEMO` and `MT5_LOGIN/PASSWORD/SERVER` in `.env`.
-5. The bot auto-detects the broker's XAUUSD symbol name (`XAUUSD`, `XAUUSDm`,
-   `XAUUSD.a`, `GOLD`, …) from the configured candidate list.
+The official **`MetaTrader5` Python package is Windows-only**. What runs where:
+
+| Mode | Windows | **Ubuntu / Linux** | macOS |
+|------|:------:|:------:|:-----:|
+| `BACKTEST` / `PAPER` (mock adapter) | ✅ native | ✅ **native** | ✅ native |
+| Test suite, indicators, config, logging | ✅ | ✅ **native** | ✅ |
+| `DEMO` / `LIVE` (real terminal) | ✅ native | ✅ via **Wine + `mt5linux` bridge** | ⚠️ Wine (unsupported) |
+
+So on your **Ubuntu server** everything except real DEMO/LIVE runs natively with
+zero extra setup. Real trading needs the Wine bridge below.
+
+## Running on Ubuntu / Linux
+
+**PAPER / BACKTEST / development** — nothing special, works out of the box:
+
+```bash
+cd xauusd-bot
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m pytest
+cd backend && PYTHONPATH=. python -m app.main      # PAPER mode, mock adapter
+```
+
+**DEMO / LIVE on Ubuntu** — the MT5 terminal is a Windows app, so run it under
+**Wine** and bridge it to native Python with [`mt5linux`](https://pypi.org/project/mt5linux/):
+
+1. Install Wine and the MetaTrader 5 terminal:
+   ```bash
+   sudo dpkg --add-architecture i386 && sudo apt update
+   sudo apt install -y wine64 wine32 winbind xvfb
+   # download & run the broker's MT5 installer under Wine:
+   wine mt5setup.exe
+   ```
+   Log in to a **demo** account in the terminal, and enable
+   *Tools → Options → Expert Advisors → Allow algorithmic trading*.
+2. Install a **Windows** Python inside the same Wine prefix, then in it:
+   ```bash
+   wine python -m pip install MetaTrader5 mt5linux
+   ```
+3. Install the bridge in your **native** Linux venv and start the RPC server
+   (it launches the Wine-side Python and listens on port 18812):
+   ```bash
+   pip install mt5linux
+   python -m mt5linux --host 0.0.0.0 -p 18812 <path-to-wine-python.exe>
+   ```
+   On a headless server wrap the terminal with `xvfb-run` so it has a display.
+4. Point the bot at the bridge in `.env`:
+   ```ini
+   TRADING_MODE=DEMO
+   MT5_USE_LINUX_BRIDGE=true
+   MT5_BRIDGE_HOST=localhost
+   MT5_BRIDGE_PORT=18812
+   MT5_LOGIN=...     MT5_PASSWORD=...     MT5_SERVER=...
+   ```
+
+The bot's `MT5Adapter5` automatically uses the bridge when
+`MT5_USE_LINUX_BRIDGE=true`; the adapter API is identical, so no strategy/risk
+code changes. It auto-detects the broker's XAUUSD symbol name (`XAUUSD`,
+`XAUUSDm`, `XAUUSD.a`, `GOLD`, …) from the configured candidate list.
+
+> **Tip:** run the bot itself as a `systemd` service and the Wine bridge as a
+> second service so both restart on reboot. Keep the terminal on a **demo**
+> account until you have completed backtesting and forward-testing.
+
+### MT5 setup on Windows (alternative)
+
+If you instead run on Windows: install the terminal, log in to a demo account,
+enable algorithmic trading, `pip install MetaTrader5`, set `TRADING_MODE=DEMO`
+and the `MT5_*` credentials — leave `MT5_USE_LINUX_BRIDGE=false`.
 
 ---
 

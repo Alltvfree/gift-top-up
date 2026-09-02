@@ -40,28 +40,64 @@ class MT5Adapter5(MT5Adapter):
         password: Optional[str] = None,
         server: Optional[str] = None,
         terminal_path: Optional[str] = None,
+        *,
+        use_linux_bridge: bool = False,
+        bridge_host: str = "localhost",
+        bridge_port: int = 18812,
     ) -> None:
         self._login = login
         self._password = password
         self._server = server
         self._terminal_path = terminal_path
-        self._mt5: Any = None  # the imported MetaTrader5 module
+        # Linux (Ubuntu) support: the native MetaTrader5 package is Windows-only.
+        # On Linux we talk to an MT5 terminal running under Wine via the
+        # `mt5linux` RPC bridge, whose API mirrors the native package.
+        self._use_linux_bridge = use_linux_bridge
+        self._bridge_host = bridge_host
+        self._bridge_port = bridge_port
+        self._mt5: Any = None  # the imported/instantiated MetaTrader5 interface
         self._connected = False
 
     # --- Lazy import ---------------------------------------------------------
     def _load_mt5(self) -> Any:
         if self._mt5 is not None:
             return self._mt5
+        if self._use_linux_bridge:
+            self._mt5 = self._load_linux_bridge()
+        else:
+            self._mt5 = self._load_native()
+        return self._mt5
+
+    def _load_native(self) -> Any:
         try:
             import MetaTrader5 as mt5  # type: ignore
         except ImportError as exc:  # pragma: no cover - platform dependent
             raise MT5AdapterError(
-                "The 'MetaTrader5' package is not installed. It is required for "
-                "DEMO/LIVE modes and is only available on Windows. Use PAPER/"
-                "BACKTEST mode (mock adapter) elsewhere."
+                "The 'MetaTrader5' package is not installed. It is Windows-only. "
+                "On Linux/Ubuntu, set MT5_USE_LINUX_BRIDGE=true to connect to an "
+                "MT5 terminal running under Wine via the mt5linux bridge, or use "
+                "PAPER/BACKTEST mode (mock adapter)."
             ) from exc
-        self._mt5 = mt5
         return mt5
+
+    def _load_linux_bridge(self) -> Any:  # pragma: no cover - needs Wine bridge
+        try:
+            from mt5linux import MetaTrader5 as BridgeMT5  # type: ignore
+        except ImportError as exc:
+            raise MT5AdapterError(
+                "MT5_USE_LINUX_BRIDGE is set but the 'mt5linux' package is not "
+                "installed. Install it (pip install mt5linux) and start the "
+                "bridge server under Wine. See the README 'Running on Ubuntu' "
+                "section."
+            ) from exc
+        try:
+            return BridgeMT5(host=self._bridge_host, port=self._bridge_port)
+        except Exception as exc:  # broad: RPC layer raises various errors
+            raise MT5AdapterError(
+                f"could not reach the mt5linux bridge at "
+                f"{self._bridge_host}:{self._bridge_port}: {exc}. Is the bridge "
+                f"server running under Wine?"
+            ) from exc
 
     # --- Timeframe mapping ---------------------------------------------------
     def _tf(self, timeframe: Timeframe) -> Any:

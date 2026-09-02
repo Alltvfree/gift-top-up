@@ -25,6 +25,9 @@ def create_adapter(settings: Settings) -> MT5Adapter:
             password=settings.mt5_password,
             server=settings.mt5_server,
             terminal_path=settings.mt5_terminal_path,
+            use_linux_bridge=settings.mt5_use_linux_bridge,
+            bridge_host=settings.mt5_bridge_host,
+            bridge_port=settings.mt5_bridge_port,
         )
     return MockMT5Adapter()
 

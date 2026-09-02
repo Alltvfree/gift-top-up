@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     mt5_server: Optional[str] = None
     mt5_terminal_path: Optional[str] = None
 
+    # Linux/Ubuntu: connect to an MT5 terminal running under Wine via the
+    # `mt5linux` RPC bridge (the native MetaTrader5 package is Windows-only).
+    mt5_use_linux_bridge: bool = False
+    mt5_bridge_host: str = "localhost"
+    mt5_bridge_port: int = 18812
+
     # Explicit live-trading gate. LIVE mode is rejected unless this is true.
     bot_allow_live: bool = False
 

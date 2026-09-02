@@ -4,6 +4,11 @@
 # dependency so the codebase (and its test suite) can run on any platform via the
 # mock adapter. Install it separately on a Windows host that runs the live/demo
 # bot:  pip install MetaTrader5
+#
+# On Ubuntu/Linux, real DEMO/LIVE trading uses the `mt5linux` RPC bridge to an
+# MT5 terminal running under Wine (also NOT a hard dependency — install on the
+# Linux host only when you enable DEMO/LIVE):  pip install mt5linux
+# See the README "Running on Ubuntu / Linux" section.
 
 # --- Phase 1 (foundation) ---
 numpy>=1.26
