@@ -24,8 +24,8 @@ complete and tested.**
 | **3** | Paper-trade execution, idempotent orders, candle dedup, position management (break-even + trailing), stateful daily limits, persistent emergency stop, trading engine | ✅ Done |
 | **4** | Historical backtester (no look-ahead), full metrics, equity/drawdown curves, monthly/daily breakdowns, trading sessions, JSON/CSV reports | ✅ Done |
 | **5** | Grid/random optimization, walk-forward (train/validation/OOS), overfitting detection (ROBUST/WARNING/HIGH RISK) | ✅ Done |
-| 6 | FastAPI + WebSocket + React/Next.js dashboard | ⏳ Planned |
-| 7 | End-to-end integration | ⏳ Planned |
+| **6** | FastAPI backend (all endpoints), WebSocket live updates, dark trading dashboard | ✅ Done |
+| 7 | End-to-end integration (bot runner, Docker) | ⏳ Planned |
 
 ---
 
@@ -63,8 +63,10 @@ xauusd-bot/
 │   │   ├── execution/     # brokers (paper/MT5), engine, position management
 │   │   ├── backtesting/   # bar-based backtester, metrics, reports
 │   │   ├── optimization/  # grid/random search, walk-forward, overfitting
+│   │   ├── api/           # FastAPI app, BotService, WebSocket, ASGI entry
 │   │   └── main.py        # runs one engine iteration (evaluate→risk→execute)
 │   └── tests/             # pytest suite
+├── frontend/index.html    # dark trading dashboard (no build step)
 ├── config/config.yaml     # strategy / risk parameters (no secrets)
 ├── .env.example           # environment template (copy to .env)
 ├── requirements.txt
@@ -176,6 +178,48 @@ python scripts/run_optimization.py   # grid search + walk-forward demo
 > is ~O(n) rather than O(n²), keeping multi-thousand-bar runs and optimization
 > sweeps tractable. The window is several multiples of the longest indicator, so
 > values match full-history indicators for practical purposes.
+
+### API + dashboard (Phase 6)
+
+A FastAPI backend exposes the endpoints from spec §30 and pushes live snapshots
+over a WebSocket; a background loop ticks the trading engine on an interval (idle
+until you start the bot).
+
+```bash
+cd xauusd-bot/backend
+PYTHONPATH=. uvicorn app.api.asgi:app --host 0.0.0.0 --port 8000
+# open http://localhost:8000  ->  dark trading dashboard
+```
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/status` | mode, running, connection, emergency stop |
+| GET | `/api/account` | balance / equity / margin |
+| GET | `/api/market/xauusd` | bid/ask/spread, trend, current signal + score |
+| GET | `/api/positions` | open positions |
+| GET | `/api/trades` | recent closed trades |
+| GET | `/api/signals` | recent signals |
+| GET | `/api/performance` | win rate, P/L, today's stats |
+| GET | `/api/equity` | equity snapshots |
+| GET | `/api/chart` | price + EMA overlay |
+| POST | `/api/bot/start` | start (LIVE requires `{"confirm":"ENABLE LIVE TRADING"}`) |
+| POST | `/api/bot/stop` | stop |
+| POST | `/api/bot/emergency-stop` | halt new trades (optionally flatten) |
+| POST | `/api/bot/resume` | clear emergency stop |
+| POST | `/api/settings` | update risk / min-score at runtime |
+| POST | `/api/backtest` | run a backtest, return the full report |
+| POST | `/api/optimization` | run a small grid search |
+| WS | `/ws` | live snapshot stream |
+
+The dashboard (`frontend/index.html`) is a dependency-free dark UI: status pills,
+stat cards (balance/equity/today's P/L/trades/price/spread), the live signal with
+score + reason, open positions, recent signals, an equity curve and a price chart
+with EMA overlay, and Start / Stop / **Emergency Stop** controls. LIVE mode shows
+a warning banner and requires typing the confirmation phrase before starting.
+
+> **Dashboard note:** this is a served single-page app (vanilla JS + WebSocket),
+> chosen so it runs on a headless Ubuntu server with **zero npm/build step**. A
+> React/Next.js version can consume the same API unchanged.
 
 ---
 

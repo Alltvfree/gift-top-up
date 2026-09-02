@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>XAUUSD Trading Bot</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #131722; --panel2: #1b2130; --border: #232a3a;
+    --text: #e6e9ef; --muted: #8b93a7; --accent: #f5b301; --green: #26a17b;
+    --red: #e15241; --blue: #3a86ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; padding: 14px 20px;
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 10; flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .5px; }
+  header h1 .gold { color: var(--accent); }
+  .pill { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill.on { background: rgba(38,161,123,.18); color: var(--green); }
+  .pill.off { background: rgba(139,147,167,.16); color: var(--muted); }
+  .pill.stop { background: rgba(225,82,65,.18); color: var(--red); }
+  .spacer { flex: 1; }
+  button {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    padding: 8px 14px; border-radius: 6px; cursor: pointer; font-weight: 600;
+    font-size: 13px;
+  }
+  button:hover { border-color: #33405c; }
+  button.start { background: var(--green); border-color: var(--green); color: #04150f; }
+  button.stop { background: var(--panel2); }
+  button.danger { background: var(--red); border-color: var(--red); color: #1a0605; }
+  main { padding: 20px; display: grid; gap: 16px; max-width: 1200px; margin: 0 auto; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  .card .value { font-size: 22px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .value.pos { color: var(--green); } .value.neg { color: var(--red); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .panel h2 { margin: 0 0 12px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 7px 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; }
+  .tag { padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+  .tag.BUY { background: rgba(38,161,123,.2); color: var(--green); }
+  .tag.SELL { background: rgba(225,82,65,.2); color: var(--red); }
+  .tag.WAIT { background: rgba(139,147,167,.16); color: var(--muted); }
+  .tag.BULLISH { color: var(--green); } .tag.BEARISH { color: var(--red); } .tag.NO_TREND { color: var(--muted); }
+  .score-bar { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; margin-top: 6px; }
+  .score-bar > div { height: 100%; background: var(--accent); }
+  .reason { color: var(--muted); font-size: 12px; margin-top: 8px; word-break: break-word; }
+  canvas { width: 100%; height: 220px; display: block; }
+  .muted { color: var(--muted); }
+  .disclaimer { color: var(--muted); font-size: 11px; text-align: center; padding: 8px; }
+  .warn { background: rgba(225,82,65,.12); border:1px solid rgba(225,82,65,.4); color:#ffb4ab; padding:10px 14px; border-radius:8px; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="gold">XAUUSD</span> Trading Bot</h1>
+  <span id="statusPill" class="pill off">—</span>
+  <span id="modePill" class="pill off">MODE</span>
+  <span id="connPill" class="pill off">MT5</span>
+  <div class="spacer"></div>
+  <button id="startBtn" class="start">▶ Start</button>
+  <button id="stopBtn" class="stop">⏸ Stop</button>
+  <button id="emergBtn" class="danger">■ Emergency Stop</button>
+</header>
+
+<main>
+  <div id="liveWarn" class="warn" hidden></div>
+
+  <div class="cards">
+    <div class="card"><div class="label">Balance</div><div id="balance" class="value">—</div></div>
+    <div class="card"><div class="label">Equity</div><div id="equity" class="value">—</div></div>
+    <div class="card"><div class="label">Today's P/L</div><div id="todayPl" class="value">—</div></div>
+    <div class="card"><div class="label">Today's Trades</div><div id="todayTrades" class="value">—</div></div>
+    <div class="card"><div class="label">Current Price</div><div id="price" class="value">—</div></div>
+    <div class="card"><div class="label">Spread (pts)</div><div id="spread" class="value">—</div></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2>Current Signal</h2>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span id="signalTag" class="tag WAIT">WAIT</span>
+        <span>Trend: <span id="trendTag" class="tag NO_TREND">—</span></span>
+        <span class="spacer"></span>
+        <span>Score: <b id="scoreVal">0</b>/100</span>
+      </div>
+      <div class="score-bar"><div id="scoreBar" style="width:0%"></div></div>
+      <div id="reason" class="reason">—</div>
+      <div style="margin-top:10px" class="muted">
+        Entry <b id="sEntry">—</b> · SL <b id="sSl">—</b> · TP <b id="sTp">—</b>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Equity Curve</h2>
+      <canvas id="equityChart"></canvas>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Price (H1) · EMA fast / slow</h2>
+    <canvas id="priceChart"></canvas>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2>Open Positions</h2>
+      <table>
+        <thead><tr><th>Side</th><th>Lots</th><th>Entry</th><th>SL</th><th>TP</th><th>P/L</th></tr></thead>
+        <tbody id="positions"><tr><td colspan="6" class="muted">No open positions</td></tr></tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <h2>Recent Signals</h2>
+      <table>
+        <thead><tr><th>Time</th><th>Signal</th><th>Score</th></tr></thead>
+        <tbody id="signals"><tr><td colspan="3" class="muted">No signals yet</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="disclaimer">
+    ⚠ Automated trading can lose money. Past/backtest performance does not guarantee
+    future results. Default mode is PAPER; LIVE requires explicit confirmation.
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (v, d=2) => (v==null||isNaN(v)) ? "—" : Number(v).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
+let digits = 2;
+
+async function api(path, method="GET", body=null) {
+  const opt = { method, headers: {"Content-Type":"application/json"} };
+  if (body) opt.body = JSON.stringify(body);
+  const r = await fetch(path, opt);
+  return r.json();
+}
+
+function setSigned(el, v) {
+  el.textContent = (v>0?"+":"") + fmt(v);
+  el.classList.toggle("pos", v>0); el.classList.toggle("neg", v<0);
+}
+
+function render(s) {
+  const st = s.status, a = s.account, m = s.market, p = s.performance;
+  digits = st.digits || 2;
+  $("statusPill").textContent = st.emergency_stop ? "EMERGENCY STOP" : (st.running ? "RUNNING" : "STOPPED");
+  $("statusPill").className = "pill " + (st.emergency_stop ? "stop" : (st.running ? "on" : "off"));
+  $("modePill").textContent = st.mode; $("modePill").className = "pill " + (st.mode==="LIVE"?"stop":"off");
+  $("connPill").textContent = st.connected ? "MT5 ✓" : "MT5 ✗";
+  $("connPill").className = "pill " + (st.connected ? "on" : "stop");
+  $("liveWarn").hidden = st.mode !== "LIVE";
+  if (st.mode === "LIVE") $("liveWarn").textContent = "LIVE MODE — real orders. Confirm before starting.";
+
+  $("balance").textContent = fmt(a.balance);
+  $("equity").textContent = fmt(a.equity);
+  setSigned($("todayPl"), p.realized_pnl_today);
+  $("todayTrades").textContent = st.trades_today;
+  $("price").textContent = m.bid!=null ? fmt((m.bid+m.ask)/2, digits) : "—";
+  $("spread").textContent = m.spread_points!=null ? fmt(m.spread_points,1) : "—";
+
+  $("signalTag").textContent = m.signal; $("signalTag").className = "tag " + m.signal;
+  $("trendTag").textContent = m.trend || "—"; $("trendTag").className = "tag " + (m.trend||"NO_TREND");
+  $("scoreVal").textContent = Math.round(m.score||0);
+  $("scoreBar").style.width = (m.score||0) + "%";
+  $("reason").textContent = m.reason || "—";
+  $("sEntry").textContent = m.entry!=null?fmt(m.entry,digits):"—";
+  $("sSl").textContent = m.sl!=null?fmt(m.sl,digits):"—";
+  $("sTp").textContent = m.tp!=null?fmt(m.tp,digits):"—";
+
+  const pos = s.positions || [];
+  $("positions").innerHTML = pos.length ? pos.map(x =>
+    `<tr><td><span class="tag ${x.side}">${x.side}</span></td><td>${fmt(x.volume,2)}</td>
+     <td>${fmt(x.entry,digits)}</td><td>${fmt(x.sl,digits)}</td><td>${fmt(x.tp,digits)}</td>
+     <td class="${x.profit>=0?'':''}" style="color:${x.profit>=0?'var(--green)':'var(--red)'}">${fmt(x.profit)}</td></tr>`
+  ).join("") : `<tr><td colspan="6" class="muted">No open positions</td></tr>`;
+}
+
+async function refreshSignals() {
+  const sigs = await api("/api/signals");
+  $("signals").innerHTML = sigs.length ? sigs.slice(0,12).map(x =>
+    `<tr><td>${new Date(x.time).toLocaleTimeString()}</td>
+     <td><span class="tag ${x.direction}">${x.direction}</span></td><td>${Math.round(x.score)}</td></tr>`
+  ).join("") : `<tr><td colspan="3" class="muted">No signals yet</td></tr>`;
+}
+
+function drawLine(canvas, series, color, opts={}) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w*dpr; canvas.height = h*dpr;
+  const ctx = canvas.getContext("2d"); ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,w,h);
+  const all = series.flatMap(s => s.data.filter(v=>v!=null));
+  if (!all.length) { ctx.fillStyle="#8b93a7"; ctx.fillText("no data", 10, 20); return; }
+  const min = Math.min(...all), max = Math.max(...all), pad = (max-min)*0.1 || 1;
+  const lo = min-pad, hi = max+pad;
+  const x = i => (i/(Math.max(series[0].data.length-1,1)))*(w-10)+5;
+  const y = v => h - ((v-lo)/(hi-lo))*(h-10) - 5;
+  for (const s of series) {
+    ctx.strokeStyle = s.color; ctx.lineWidth = s.width||1.5; ctx.beginPath();
+    let started=false;
+    s.data.forEach((v,i)=>{ if(v==null){started=false;return;}
+      if(!started){ctx.moveTo(x(i),y(v));started=true;} else ctx.lineTo(x(i),y(v)); });
+    ctx.stroke();
+  }
+}
+
+async function refreshCharts() {
+  const eq = await api("/api/equity");
+  drawLine($("equityChart"), [{data: eq.map(e=>e.equity), color:"#3a86ff", width:2}], "#3a86ff");
+  const c = await api("/api/chart");
+  drawLine($("priceChart"), [
+    {data: c.candles.map(k=>k.close), color:"#e6e9ef", width:1.5},
+    {data: c.ema_fast, color:"#f5b301", width:1.2},
+    {data: c.ema_slow, color:"#3a86ff", width:1.2},
+  ], "#e6e9ef");
+}
+
+$("startBtn").onclick = async () => {
+  const st = await api("/api/status");
+  let confirm = null;
+  if (st.mode === "LIVE") {
+    confirm = prompt("Type 'ENABLE LIVE TRADING' to start LIVE trading:");
+    if (confirm !== "ENABLE LIVE TRADING") return;
+  }
+  await api("/api/bot/start","POST",{confirm});
+};
+$("stopBtn").onclick = () => api("/api/bot/stop","POST",{});
+$("emergBtn").onclick = async () => {
+  if (confirm("Activate EMERGENCY STOP? This halts new trades.")) {
+    const close = confirm("Also CLOSE all open positions?");
+    await api("/api/bot/emergency-stop","POST",{close_positions:close});
+  }
+};
+
+// WebSocket for live snapshots, with polling fallback.
+function connectWS() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onmessage = (ev) => { try { render(JSON.parse(ev.data)); } catch(e){} };
+  ws.onclose = () => setTimeout(connectWS, 3000);
+}
+async function pollOnce() {
+  try {
+    const [status, account, market, positions, performance] = await Promise.all([
+      api("/api/status"), api("/api/account"), api("/api/market/xauusd"),
+      api("/api/positions"), api("/api/performance"),
+    ]);
+    render({status, account, market, positions, performance});
+  } catch(e){}
+}
+
+connectWS();
+pollOnce();
+refreshSignals(); refreshCharts();
+setInterval(pollOnce, 3000);
+setInterval(refreshSignals, 5000);
+setInterval(refreshCharts, 8000);
+</script>
+</body>
+</html>
