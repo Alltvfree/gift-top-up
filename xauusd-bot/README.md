@@ -21,7 +21,7 @@ complete and tested.**
 |------:|-------|--------|
 | **1** | Project structure, config, logging, MT5 connection abstraction, XAUUSD symbol detection, market data, indicators (EMA/RSI/ATR), tests | ✅ Done |
 | **2** | Strategy engine, BUY/SELL/WAIT signals, 0-100 scoring, ATR SL/TP, position sizing + per-trade risk gates | ✅ Done |
-| 3 | Paper trading, order execution, duplicate protection, position management, break-even, trailing stop, daily limits | ⏳ Planned |
+| **3** | Paper-trade execution, idempotent orders, candle dedup, position management (break-even + trailing), stateful daily limits, persistent emergency stop, trading engine | ✅ Done |
 | 4 | Historical backtester, metrics, equity/drawdown curves | ⏳ Planned |
 | 5 | Optimization, walk-forward, overfitting detection | ⏳ Planned |
 | 6 | FastAPI + WebSocket + React/Next.js dashboard | ⏳ Planned |
@@ -59,8 +59,9 @@ xauusd-bot/
 │   │   ├── indicators/    # EMA, RSI, ATR
 │   │   ├── mt5/           # adapter interface, mock + real adapters, market data
 │   │   ├── strategies/    # Strategy interface + XAUUSD_TrendPullback_v1
-│   │   ├── risk/          # SL/TP, position sizing, risk manager
-│   │   └── main.py        # foundation + signal/risk smoke check
+│   │   ├── risk/          # SL/TP, position sizing, risk manager, governor
+│   │   ├── execution/     # brokers (paper/MT5), engine, position management
+│   │   └── main.py        # runs one engine iteration (evaluate→risk→execute)
 │   └── tests/             # pytest suite
 ├── config/config.yaml     # strategy / risk parameters (no secrets)
 ├── .env.example           # environment template (copy to .env)
@@ -92,8 +93,37 @@ exceeded. The `RiskManager` is the single gate every actionable signal must pass
 (actionable + has SL, spread OK, position count OK, sizable within budget).
 
 > These thresholds are a configurable starting point, **not** proven-profitable
-> settings — see the safety principles below. Stateful protections (daily loss,
-> drawdown, cooldown, max-daily-trades, emergency stop) arrive in Phase 3.
+> settings — see the safety principles below.
+
+### Execution & safety (Phase 3)
+
+The `TradingEngine` runs one deterministic iteration — *evaluate → risk gate →
+execute → manage positions* — with the protections that make it safe to leave
+running:
+
+* **Paper broker** — a fully simulated broker fills orders at the tick (with
+  configurable slippage/commission), marks positions to market, and auto-closes
+  on SL/TP. It is the source of truth for the simulated PAPER account. DEMO/LIVE
+  swap in the real MT5 broker behind the same interface.
+* **Idempotent orders** — every order is keyed by `signal_id`; a retry or
+  duplicate signal never opens a second position.
+* **Candle dedup** — a completed entry-timeframe candle is evaluated exactly
+  once (no repeat entries on the same bar, no look-ahead).
+* **Stateful risk governor** — daily-loss `STOP_TRADING`, account-drawdown
+  disable, max-trades-per-day, post-trade cooldown, consecutive-loss tracking.
+* **Position management** — break-even (move SL to entry ± buffer at +1R) and
+  ATR trailing stop, both **forward-only** (a stop never moves backward).
+* **Emergency stop** — persisted to disk (JSON state), survives restart, and
+  optionally flattens open positions.
+
+State (emergency stop, daily counters, candle markers, open-trade metadata) is
+persisted every iteration to `data/bot_state.json`, so a restart resumes safely.
+Full PostgreSQL trade/equity history and the backtester come next.
+
+```bash
+cd xauusd-bot/backend
+PYTHONPATH=. python -m app.main      # one PAPER engine iteration
+```
 
 ---
 

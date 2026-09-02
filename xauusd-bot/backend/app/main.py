@@ -1,16 +1,15 @@
-"""Phase 1 entrypoint — foundation smoke check.
+"""Entrypoint — connect, then run one trading-engine iteration.
 
-Run as a module to verify the foundation wires together end-to-end:
+    cd xauusd-bot/backend
+    PYTHONPATH=. python -m app.main
 
-    cd xauusd-bot
-    python -m app.main            # from the backend/ dir, or:
-    PYTHONPATH=backend python -m app.main
+In PAPER/BACKTEST mode this uses the mock adapter (SYNTHETIC data) + a simulated
+paper broker, so it runs anywhere. In DEMO/LIVE it connects to a real
+MetaTrader 5 terminal and broker.
 
-In PAPER/BACKTEST mode this connects to the mock adapter (SYNTHETIC data) so it
-runs anywhere. In DEMO/LIVE it connects to a real MetaTrader 5 terminal.
-
-This is NOT the trading loop — the strategy/execution engine arrives in later
-phases. It only proves connection, symbol detection, market data and indicators.
+This runs a SINGLE engine iteration (evaluate → risk gate → execute → manage) as
+a smoke check. A continuous scheduled loop is a later phase; the logic here is
+identical to one tick of that loop.
 """
 
 from __future__ import annotations
@@ -18,11 +17,14 @@ from __future__ import annotations
 from app.core.config import load_config, load_settings
 from app.core.logging import configure_logging, get_logger, log_event
 from app.core.models import Timeframe
+from app.core.state import StateStore
+from app.execution.engine import TradingEngine
+from app.execution.factory import create_broker
 from app.indicators.indicators import atr, ema, rsi
 from app.mt5.factory import create_adapter
 from app.mt5.market_data import MarketDataService
+from app.risk.governor import RiskGovernor
 from app.risk.risk_manager import RiskManager
-from app.strategies.base import StrategyInput
 from app.strategies.factory import create_strategy
 
 
@@ -91,45 +93,43 @@ def run() -> int:
             atr=round(float(atr_val), info.digits),
         )
 
-    # --- Phase 2: evaluate one signal and run it through the risk gate --------
-    strategy = create_strategy(config)
-    risk_manager = RiskManager(config.risk)
-    strat_input = StrategyInput(
-        symbol_info=info,
-        trend_df=market.get_ohlc_frame(Timeframe(config.timeframes.trend), 300),
-        setup_df=market.get_ohlc_frame(Timeframe(config.timeframes.setup), 200),
-        entry_df=market.get_ohlc_frame(Timeframe(config.timeframes.entry), 200),
-        tick=tick,
-        spread_points=market.get_spread_points(),
+    # --- Phase 3: build the execution stack and run one engine iteration ------
+    state_store = StateStore(f"{settings.log_dir}/../data/bot_state.json")
+    state = state_store.load()
+    broker = create_broker(
+        settings, adapter, info, starting_balance=account.balance
     )
-    signal = strategy.evaluate(strat_input)
-    log_event(
-        log,
-        "SIGNAL_GENERATED",
-        signal.reason,
-        direction=signal.direction.value,
-        score=signal.score,
-        components=signal.components,
+    engine = TradingEngine(
+        config=config,
+        market=market,
+        strategy=create_strategy(config),
+        risk_manager=RiskManager(config.risk),
+        governor=RiskGovernor(config.risk, state),
+        broker=broker,
+        state=state,
+        state_store=state_store,
     )
-    if signal.is_actionable:
-        decision = risk_manager.evaluate(
-            signal, account, info,
-            spread_points=strat_input.spread_points,
-            open_positions=len(adapter.get_positions(info.name)),
-        )
+
+    result = engine.process_once()
+    if result.signal is not None:
         log_event(
-            log,
-            "RISK_DECISION",
-            decision.reason,
-            approved=decision.approved,
-            lot_size=decision.lot_size,
-            entry=signal.entry,
-            sl=signal.stop_loss,
-            tp=signal.take_profit,
+            log, "ITERATION",
+            f"{result.signal.direction.value} score={result.signal.score}",
+            opened=result.opened_trade, closed=len(result.closed),
+            stop_updates=result.stop_updates, gate=result.gate_reason,
+            skipped=result.skipped_reason,
         )
+    else:
+        log_event(log, "ITERATION", "no signal this iteration",
+                  skipped=result.skipped_reason, gate=result.gate_reason)
+
+    acct = broker.get_account()
+    log_event(log, "PAPER_ACCOUNT",
+              f"balance={acct.balance:.2f} equity={acct.equity:.2f}",
+              open_positions=len(broker.get_positions(info.name)))
 
     adapter.disconnect()
-    log_event(log, "BOT_SHUTDOWN", "foundation smoke check complete")
+    log_event(log, "BOT_SHUTDOWN", "engine iteration complete")
     return 0
 
 

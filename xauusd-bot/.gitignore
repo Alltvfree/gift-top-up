@@ -22,8 +22,10 @@ coverage.xml
 
 # --- Data / logs / runtime state ---
 logs/
+data/
 data/*.db
 data/*.sqlite
+data/bot_state*.json
 *.log
 
 # --- OS / editor ---
