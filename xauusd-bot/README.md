@@ -23,7 +23,7 @@ complete and tested.**
 | **2** | Strategy engine, BUY/SELL/WAIT signals, 0-100 scoring, ATR SL/TP, position sizing + per-trade risk gates | ✅ Done |
 | **3** | Paper-trade execution, idempotent orders, candle dedup, position management (break-even + trailing), stateful daily limits, persistent emergency stop, trading engine | ✅ Done |
 | **4** | Historical backtester (no look-ahead), full metrics, equity/drawdown curves, monthly/daily breakdowns, trading sessions, JSON/CSV reports | ✅ Done |
-| 5 | Optimization, walk-forward, overfitting detection | ⏳ Planned |
+| **5** | Grid/random optimization, walk-forward (train/validation/OOS), overfitting detection (ROBUST/WARNING/HIGH RISK) | ✅ Done |
 | 6 | FastAPI + WebSocket + React/Next.js dashboard | ⏳ Planned |
 | 7 | End-to-end integration | ⏳ Planned |
 
@@ -62,6 +62,7 @@ xauusd-bot/
 │   │   ├── risk/          # SL/TP, position sizing, risk manager, governor
 │   │   ├── execution/     # brokers (paper/MT5), engine, position management
 │   │   ├── backtesting/   # bar-based backtester, metrics, reports
+│   │   ├── optimization/  # grid/random search, walk-forward, overfitting
 │   │   └── main.py        # runs one engine iteration (evaluate→risk→execute)
 │   └── tests/             # pytest suite
 ├── config/config.yaml     # strategy / risk parameters (no secrets)
@@ -150,6 +151,31 @@ python scripts/run_backtest.py       # demo on SYNTHETIC data
 > the point. It proves the mechanics; it makes **no** profitability claim. Feed
 > real historical candles for a meaningful backtest, then validate out-of-sample
 > and on a demo account before risking capital.
+
+### Optimization & walk-forward (Phase 5)
+
+Grid and random search over a parameter space (dotted config paths like
+`take_profit.risk_reward`), each candidate scored by a configurable objective
+(net profit, profit factor, expectancy, Sharpe) with a **minimum trade count** so
+a 2-trade fluke can't win. Every result is saved.
+
+**Walk-forward** splits history into consecutive train → validation →
+out-of-sample windows; parameters are optimized on TRAIN only, checked on
+VALIDATION, and measured on OUT-OF-SAMPLE data never used for selection (spec
+§22). Each fold is graded by the **overfitting detector**
+(`ROBUST` / `WARNING` / `HIGH OVERFITTING RISK`) which flags extreme returns,
+thin trade counts, excessive drawdown, and train→validation→OOS degradation.
+The system **never auto-deploys** an optimized strategy to live trading.
+
+```bash
+cd xauusd-bot
+python scripts/run_optimization.py   # grid search + walk-forward demo
+```
+
+> **Backtest performance:** the per-bar indicator window is capped so a backtest
+> is ~O(n) rather than O(n²), keeping multi-thousand-bar runs and optimization
+> sweeps tractable. The window is several multiples of the longest indicator, so
+> values match full-history indicators for practical purposes.
 
 ---
 

@@ -50,7 +50,14 @@ class Backtester:
         self.setup_tf = Timeframe(config.timeframes.setup)
         self.entry_tf = Timeframe(config.timeframes.entry)
 
-    def run(self) -> BacktestResult:
+    def run(self, trade_start=None, trade_end=None) -> BacktestResult:
+        """Run the backtest.
+
+        ``trade_start``/``trade_end`` (UTC datetimes) restrict when NEW trades
+        may open and when equity is sampled — used for walk-forward windows.
+        Indicator history always spans all prior candles, so restricting the
+        window never introduces look-ahead.
+        """
         entry = self.candles[self.entry_tf]
         setup = self.candles[self.setup_tf]
         trend = self.candles[self.trend_tf]
@@ -77,17 +84,32 @@ class Backtester:
         )
 
         # Warm-up so every indicator has a full window on all timeframes.
-        warmup = max(self.config.strategy.ema_slow, self.config.strategy.atr_period) + 5
+        s = self.config.strategy
+        warmup = max(s.ema_slow, s.atr_period) + 5
+        # Cap the per-bar indicator window so the backtest is ~O(n) rather than
+        # O(n^2). The window is generous (several multiples of the longest
+        # indicator), so indicator values are effectively identical to using
+        # full history, and every backtest stays reproducible.
+        lookback = max(
+            s.ema_slow, s.ema_fast, s.ema_short, s.rsi_period, s.atr_period,
+            s.structure_lookback,
+        ) * 4 + 50
 
         for i in range(warmup, len(entry)):
             bar = entry[i]
             decision_time = bar.time + timedelta(minutes=self.entry_tf.minutes)
 
             # Higher-tf ATR (for stop management) from completed setup candles.
-            setup_slice = setup[: bisect.bisect_right(setup_done, decision_time)]
+            setup_end = bisect.bisect_right(setup_done, decision_time)
+            setup_slice = setup[max(0, setup_end - lookback): setup_end]
             atr_value = self._atr(setup_slice)
 
-            # 1) Manage/close an open position on this bar.
+            in_window = (
+                (trade_start is None or decision_time >= trade_start)
+                and (trade_end is None or decision_time <= trade_end)
+            )
+
+            # 1) Manage/close an open position on this bar (always).
             if sim.has_position:
                 trade = sim.on_bar(bar, atr_value)
                 if trade is not None:
@@ -95,23 +117,24 @@ class Backtester:
                     governor.register_trade_closed(trade.profit, bar.time)
                     result.trades.append(trade)
 
-            # 2) Sample equity at this bar's close.
+            # 2) Sample equity at this bar's close (within the trading window).
             equity = balance + sim.unrealized(bar.close)
-            result.equity_curve.append((bar.time, round(equity, 2)))
+            if in_window:
+                result.equity_curve.append((bar.time, round(equity, 2)))
 
-            # 3) Look for a new entry when flat.
-            if not sim.has_position:
+            # 3) Look for a new entry when flat and inside the trading window.
+            if in_window and not sim.has_position:
                 gate = governor.can_open_new_trade(decision_time, equity)
                 if gate.allowed:
-                    trend_slice = trend[
-                        : bisect.bisect_right(trend_done, decision_time)
-                    ]
+                    trend_end = bisect.bisect_right(trend_done, decision_time)
+                    trend_slice = trend[max(0, trend_end - lookback): trend_end]
+                    entry_slice = entry[max(0, i + 1 - lookback): i + 1]
                     signal = self.strategy.evaluate(
                         StrategyInput(
                             symbol_info=self.info,
                             trend_df=candles_to_frame(trend_slice),
                             setup_df=candles_to_frame(setup_slice),
-                            entry_df=candles_to_frame(entry[: i + 1]),
+                            entry_df=candles_to_frame(entry_slice),
                             tick=None, spread_points=None, now=decision_time,
                         )
                     )
