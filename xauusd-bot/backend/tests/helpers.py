@@ -108,6 +108,18 @@ class FakeAdapter(MT5Adapter):
         )
 
 
+def build_uptrend_dataset(n_entry: int = 1500, start: float = 1900.0,
+                          stop: float = 2100.0):
+    """Time-aligned M5/M15/H1 candle lists rising start->stop for backtests."""
+    n_setup = n_entry * Timeframe.M5.minutes // Timeframe.M15.minutes + 5
+    n_trend = n_entry * Timeframe.M5.minutes // Timeframe.H1.minutes + 5
+    return {
+        Timeframe.H1: make_candles(rising(n_trend, start, stop), Timeframe.H1),
+        Timeframe.M15: make_candles(rising(n_setup, start, stop), Timeframe.M15),
+        Timeframe.M5: make_candles(rising(n_entry, start, stop), Timeframe.M5),
+    }
+
+
 def build_uptrend_market(balance: float = 10_000.0) -> tuple[MarketDataService, FakeAdapter]:
     """A clean rising market across all three timeframes -> BUY-able."""
     frames = {

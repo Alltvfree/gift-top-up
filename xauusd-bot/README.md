@@ -22,7 +22,7 @@ complete and tested.**
 | **1** | Project structure, config, logging, MT5 connection abstraction, XAUUSD symbol detection, market data, indicators (EMA/RSI/ATR), tests | ✅ Done |
 | **2** | Strategy engine, BUY/SELL/WAIT signals, 0-100 scoring, ATR SL/TP, position sizing + per-trade risk gates | ✅ Done |
 | **3** | Paper-trade execution, idempotent orders, candle dedup, position management (break-even + trailing), stateful daily limits, persistent emergency stop, trading engine | ✅ Done |
-| 4 | Historical backtester, metrics, equity/drawdown curves | ⏳ Planned |
+| **4** | Historical backtester (no look-ahead), full metrics, equity/drawdown curves, monthly/daily breakdowns, trading sessions, JSON/CSV reports | ✅ Done |
 | 5 | Optimization, walk-forward, overfitting detection | ⏳ Planned |
 | 6 | FastAPI + WebSocket + React/Next.js dashboard | ⏳ Planned |
 | 7 | End-to-end integration | ⏳ Planned |
@@ -61,6 +61,7 @@ xauusd-bot/
 │   │   ├── strategies/    # Strategy interface + XAUUSD_TrendPullback_v1
 │   │   ├── risk/          # SL/TP, position sizing, risk manager, governor
 │   │   ├── execution/     # brokers (paper/MT5), engine, position management
+│   │   ├── backtesting/   # bar-based backtester, metrics, reports
 │   │   └── main.py        # runs one engine iteration (evaluate→risk→execute)
 │   └── tests/             # pytest suite
 ├── config/config.yaml     # strategy / risk parameters (no secrets)
@@ -118,12 +119,37 @@ running:
 
 State (emergency stop, daily counters, candle markers, open-trade metadata) is
 persisted every iteration to `data/bot_state.json`, so a restart resumes safely.
-Full PostgreSQL trade/equity history and the backtester come next.
 
 ```bash
 cd xauusd-bot/backend
 PYTHONPATH=. python -m app.main      # one PAPER engine iteration
 ```
+
+### Backtesting (Phase 4)
+
+A bar-based backtester replays the entry timeframe and, at each completed bar,
+rebuilds the higher-timeframe views from **only the candles that had closed by
+that moment** — so the strategy never sees the future (spec §§18,37). It reuses
+the same strategy, sizing, SL/TP and break-even/trailing logic as live, and
+honors costs (commission/slippage), daily-loss limits, cooldown and trading
+sessions. Intrabar SL/TP fills use each bar's high/low; when a bar touches both,
+the **stop is assumed hit first** (worst case).
+
+Metrics (spec §21): total/win/loss, win rate, net/gross profit, profit factor,
+average win/loss/trade, max drawdown, Sharpe & Sortino (per-trade, not
+annualized), expectancy (currency and R), longest win/loss streaks — plus equity
+& drawdown curves, monthly/daily performance, and an R-multiple trade
+distribution. Reports export to JSON and CSV.
+
+```bash
+cd xauusd-bot
+python scripts/run_backtest.py       # demo on SYNTHETIC data
+```
+
+> The demo runs on synthetic random data and will not be profitable — that is
+> the point. It proves the mechanics; it makes **no** profitability claim. Feed
+> real historical candles for a meaningful backtest, then validate out-of-sample
+> and on a demo account before risking capital.
 
 ---
 

@@ -21,6 +21,7 @@ from typing import Optional
 
 from app.core.config import RiskConfig
 from app.core.state import BotState, rollover_day
+from app.risk.sessions import SessionFilter
 
 
 @dataclass(frozen=True)
@@ -30,9 +31,16 @@ class GateResult:
 
 
 class RiskGovernor:
-    def __init__(self, config: RiskConfig, state: BotState) -> None:
+    def __init__(
+        self,
+        config: RiskConfig,
+        state: BotState,
+        *,
+        session_filter: Optional[SessionFilter] = None,
+    ) -> None:
         self.config = config
         self.state = state
+        self.session_filter = session_filter
 
     # --- daily bookkeeping ---------------------------------------------------
     def sync_equity(self, now: datetime, equity: float) -> None:
@@ -49,6 +57,9 @@ class RiskGovernor:
 
         if s.emergency_stop:
             return GateResult(False, "emergency stop is active")
+
+        if self.session_filter is not None and not self.session_filter.is_open(now):
+            return GateResult(False, "outside configured trading session")
 
         # Daily loss (equity drop from the day's starting equity).
         if s.day_start_equity > 0:
