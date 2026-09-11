@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { useAuth } from "@/components/auth-provider";
+import { LoginScreen } from "@/components/login-screen";
 
 const NAV = [
   { to: "/", glyph: "▣", label: "Home" },
@@ -12,8 +14,25 @@ const NAV = [
   { to: "/admin", glyph: "☰", label: "Admin" },
 ] as const;
 
+function initials(email?: string | null) {
+  if (!email) return "TT";
+  const name = email.split("@")[0];
+  return name.slice(0, 2).toUpperCase();
+}
+
 export function ConsoleShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const { session, loading, user } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-ink">
+        <div className="font-mono text-xs tracking-widest text-muted">LOADING…</div>
+      </div>
+    );
+  }
+
+  if (!session) return <LoginScreen />;
 
   return (
     <div className="min-h-screen bg-ink text-fg">
@@ -34,8 +53,11 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
             <span className="flex items-center gap-1.5 rounded-full border border-up/25 bg-up/10 px-2.5 py-1 font-mono text-[10px] text-up">
               <span className="tick-live size-1.5 rounded-full bg-up" /> LIVE
             </span>
-            <div className="grid size-8 place-items-center rounded-md border border-line bg-panel text-xs font-semibold text-amber">
-              TT
+            <div
+              title={user?.email ?? undefined}
+              className="grid size-8 place-items-center rounded-md border border-line bg-panel text-xs font-semibold text-amber"
+            >
+              {initials(user?.email)}
             </div>
           </div>
         </div>

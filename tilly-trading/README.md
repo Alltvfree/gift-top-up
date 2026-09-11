@@ -4,32 +4,40 @@ A cloud-based **automated forex trading platform**. Connect a broker (Exness / X
 Vantage via MetaAPI), run **GRID** and **DCA** bots 24/5, and spin up strategies from
 **AI-generated presets** — all from a dark, mobile-first operator console.
 
-> Status: **Runnable full stack** ✅
-> Scaffolding + database + JWT auth + bot CRUD/lifecycle are done and tested.
-> It runs locally with **zero external services** (SQLite by default). Live broker
-> execution (MetaAPI) and the Celery trading loop land in Tasks 3–4
-> (see [Build order](#build-order)).
+> Status: **Web app runs on Supabase + Cloudflare Pages** ✅
+> The Next.js console talks **directly to Supabase** — Supabase Auth for login and
+> PostgREST + Row Level Security for data. No application server to run or host.
+> Live broker execution (MetaAPI) and the trading loop land in Tasks 3–4.
 
 ---
 
-## ⚡ Fastest way to run (VS Code, zero setup)
+## Architecture
 
-No Docker, no Postgres, no config required — the backend uses a local SQLite file
-by default and creates its tables + seeds AI presets on first boot.
+There are two independent pieces:
 
-**1. Backend** (terminal 1):
+**1. Web app (the live deployment)** — Next.js static export on **Cloudflare Pages**,
+talking straight to **Supabase**:
 
-```bash
-cd tilly-trading/backend
-python -m venv .venv
-# macOS/Linux:
-source .venv/bin/activate
-# Windows (PowerShell):  .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-uvicorn app.main:app --reload      # → http://localhost:8000/docs
+```
+Browser ── Next.js (Cloudflare Pages, static) ──► Supabase
+                                                   ├─ Auth  (login/signup)
+                                                   ├─ Postgres + PostgREST (bots, positions…)
+                                                   └─ Row Level Security (per-user isolation)
 ```
 
-**2. Frontend** (terminal 2):
+No server process is needed — auth and data access happen in the browser against
+Supabase, secured by RLS. This is what you deploy.
+
+**2. FastAPI backend (optional, future bot-runner)** — the Python service in
+`backend/` implements the GRID/DCA engine, MetaAPI broker adapter and Celery runner.
+It is **not required by the web app** and isn't part of the Cloudflare/Supabase
+deployment; it will run on a worker host when live trading is wired (Tasks 3–4).
+
+---
+
+## Run the web app locally
+
+Only Node is required — it connects to the shared Supabase project.
 
 ```bash
 cd tilly-trading/web
@@ -37,11 +45,33 @@ npm install
 npm run dev                         # → http://localhost:3000
 ```
 
-Open **http://localhost:3000** for the console UI, and **http://localhost:8000/docs**
-for the interactive API (register a user, click **Authorize**, then create/start bots).
+The Supabase URL + publishable key are baked in as fallbacks (and overridable via
+`.env.local`; see [`web/.env.example`](./web/.env.example)). Sign up / sign in on the
+first screen, then create a bot — it's written to your Supabase `bots` table and
+shows up under **Table Editor → bots**.
 
-**In VS Code:** open the `tilly-trading` folder, then **Run and Debug → “Run Full Stack
-(backend + web)”** to launch both at once. Recommended extensions are prompted on open.
+> **Instant signup:** by default Supabase emails a confirmation link. To skip that
+> while testing, turn off **Authentication → Sign In / Providers → Email → "Confirm
+> email"** in the Supabase dashboard; otherwise click the link in the email, then sign in.
+
+---
+
+## Deploy the web app to Cloudflare Pages
+
+`npm run build` produces a static site in `web/out/`. In Cloudflare Pages → **Create
+project → Connect to Git**, then set:
+
+| Setting                | Value            |
+| ---------------------- | ---------------- |
+| Framework preset       | Next.js (Static Export) |
+| Root directory         | `tilly-trading/web` |
+| Build command          | `npm run build`  |
+| Build output directory | `out`            |
+
+Optionally set the env vars `NEXT_PUBLIC_SUPABASE_URL` and
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` (they default to this project if omitted). After the
+first deploy, add your Pages URL to the Supabase **Auth → URL Configuration → Site URL
+/ Redirect URLs** so auth redirects resolve.
 
 ---
 
