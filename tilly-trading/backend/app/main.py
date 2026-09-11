@@ -56,4 +56,5 @@ async def root() -> dict:
 
 @app.get("/health", tags=["meta"])
 async def health() -> dict:
-    return {"status": "ok", "environment": settings.environment}
+    # `build` is bumped on deploys we need to confirm are live.
+    return {"status": "ok", "environment": settings.environment, "build": "cors3"}
