@@ -70,6 +70,14 @@ function Account() {
     loadAccounts();
   }, [loadAccounts]);
 
+  // While an account is still provisioning, poll every 5s for the result.
+  useEffect(() => {
+    if (accounts.some((a) => a.status === "provisioning")) {
+      const t = setTimeout(loadAccounts, 5000);
+      return () => clearTimeout(t);
+    }
+  }, [accounts, loadAccounts]);
+
   return (
     <>
       <h1 className="font-mono text-xs tracking-widest text-muted">MY ACCOUNT</h1>
@@ -340,7 +348,7 @@ function LinkBrokerForm({ onDone }: { onDone: () => void }) {
         disabled={busy}
         className="h-9 w-full rounded-lg bg-amber font-mono text-[11px] font-semibold text-ink transition active:scale-[0.98] disabled:opacity-50"
       >
-        {busy ? "Provisioning… (can take ~1 min)" : "Link account"}
+        {busy ? "Linking…" : "Link account"}
       </button>
     </form>
   );

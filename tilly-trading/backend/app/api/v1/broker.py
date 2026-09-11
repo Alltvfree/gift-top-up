@@ -9,16 +9,42 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from sqlalchemy import select
 
 from app.core.deps import DbSession
 from app.core.supabase_auth import SupabaseUserId
 from app.db.models.broker_account import BrokerAccount
+from app.db.session import async_session_factory
 from app.schemas.broker import BrokerAccountOut, BrokerLinkRequest
 from app.services.broker_service import provision_account
 
 router = APIRouter()
+
+
+async def _provision_and_update(
+    account_id: uuid.UUID, name: str, login: str, password: str, server: str, platform: str
+) -> None:
+    """Background job: provision via MetaAPI (slow) and update the row."""
+    async with async_session_factory() as session:
+        account = await session.get(BrokerAccount, account_id)
+        if account is None:
+            return
+        try:
+            result = await provision_account(
+                name=name, login=login, password=password, server=server, platform=platform
+            )
+            account.metaapi_account_id = result.metaapi_account_id
+            account.balance = result.balance
+            if result.currency:
+                account.currency = result.currency
+            account.status = "connected"
+            account.is_active = True
+            account.last_error = None
+        except Exception as exc:  # noqa: BLE001 - record failure on the row
+            account.status = "error"
+            account.last_error = str(exc)[:500]
+        await session.commit()
 
 
 @router.post("/ping")
@@ -39,10 +65,17 @@ async def list_accounts(user_id: SupabaseUserId, db: DbSession) -> list[BrokerAc
 
 @router.post("/link", response_model=BrokerAccountOut, status_code=status.HTTP_201_CREATED)
 async def link_account(
-    payload: BrokerLinkRequest, user_id: SupabaseUserId, db: DbSession
+    payload: BrokerLinkRequest,
+    user_id: SupabaseUserId,
+    db: DbSession,
+    background: BackgroundTasks,
 ) -> BrokerAccount:
-    # Persist a pending row first so the attempt is visible even if provisioning
-    # fails midway.
+    """Create a pending broker account and provision it in the background.
+
+    MetaAPI provisioning (create + deploy + wait_connected) can take a minute or
+    more, so we return immediately with status 'provisioning'; the client polls
+    broker_accounts for the final 'connected' / 'error' status.
+    """
     account = BrokerAccount(
         user_id=user_id,
         broker_name=payload.broker_name.lower(),
@@ -57,33 +90,15 @@ async def link_account(
     await db.commit()
     await db.refresh(account)
 
-    try:
-        result = await provision_account(
-            name=f"{payload.broker_name}-{payload.login}",
-            login=payload.login,
-            password=payload.password,
-            server=payload.server,
-            platform=payload.platform.value,
-        )
-    except Exception as exc:  # noqa: BLE001 - surface provisioning failures to the user
-        account.status = "error"
-        account.last_error = str(exc)[:500]
-        await db.commit()
-        await db.refresh(account)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Broker provisioning failed: {exc}",
-        ) from exc
-
-    account.metaapi_account_id = result.metaapi_account_id
-    account.balance = result.balance
-    if result.currency:
-        account.currency = result.currency
-    account.status = "connected"
-    account.is_active = True
-    account.last_error = None
-    await db.commit()
-    await db.refresh(account)
+    background.add_task(
+        _provision_and_update,
+        account.id,
+        f"{payload.broker_name}-{payload.login}",
+        payload.login,
+        payload.password,
+        payload.server,
+        payload.platform.value,
+    )
     return account
 
 
