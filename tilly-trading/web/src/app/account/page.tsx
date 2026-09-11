@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ConsoleShell, SectionTitle } from "@/components/console-shell";
 import { useAuth } from "@/components/auth-provider";
 import { fetchBrokerAccounts } from "@/lib/db";
-import { brokerApiConfigured, linkBroker } from "@/lib/broker-api";
+import { API_URL, brokerApiConfigured, linkBroker, pingBackend } from "@/lib/broker-api";
 import { displayName, isAdmin } from "@/lib/roles";
 import type { BrokerAccountRow } from "@/lib/supabase";
 
@@ -229,6 +229,7 @@ function LinkBrokerForm({ onDone }: { onDone: () => void }) {
   const [accountType, setAccountType] = useState<"demo" | "live">("demo");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ping, setPing] = useState<string | null>(null);
 
   if (!brokerApiConfigured) {
     return (
@@ -264,6 +265,21 @@ function LinkBrokerForm({ onDone }: { onDone: () => void }) {
 
   return (
     <form onSubmit={submit} className="mb-2 space-y-2 rounded-lg border border-line bg-panel p-3">
+      <div className="rounded-md border border-line bg-ink p-2">
+        <div className="font-mono text-[9px] tracking-widest text-muted">API</div>
+        <div className="break-all font-mono text-[10px] text-fg">{API_URL || "(not set)"}</div>
+        <button
+          type="button"
+          onClick={async () => {
+            setPing("testing…");
+            setPing(await pingBackend());
+          }}
+          className="mt-1 rounded border border-line bg-panel2 px-2 py-1 font-mono text-[10px] text-amber"
+        >
+          Test backend
+        </button>
+        {ping && <div className="mt-1 break-all font-mono text-[10px] text-up">{ping}</div>}
+      </div>
       <div className="grid grid-cols-2 gap-2">
         <select value={broker} onChange={(e) => setBroker(e.target.value)} className={field}>
           <option value="exness">Exness</option>

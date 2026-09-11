@@ -10,6 +10,18 @@ import { supabase } from "@/lib/supabase";
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
 export const brokerApiConfigured = API_URL.length > 0;
 
+/** Diagnostic: GET the backend /health from the browser (exercises CORS too). */
+export async function pingBackend(): Promise<string> {
+  if (!brokerApiConfigured) return "NEXT_PUBLIC_API_URL not set";
+  try {
+    const res = await fetch(`${API_URL}/health`, { method: "GET" });
+    const body = await res.text();
+    return `HTTP ${res.status} · ${body.slice(0, 120)}`;
+  } catch (e) {
+    return `fetch failed: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
 export interface LinkBrokerInput {
   broker_name: string;
   login: string;
