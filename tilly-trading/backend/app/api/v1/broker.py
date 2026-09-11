@@ -21,6 +21,12 @@ from app.services.broker_service import provision_account
 router = APIRouter()
 
 
+@router.post("/ping")
+async def ping(user_id: SupabaseUserId) -> dict:
+    """Fast authenticated POST — isolates CORS/preflight+auth from provisioning."""
+    return {"ok": True, "user_id": str(user_id)}
+
+
 @router.get("/accounts", response_model=list[BrokerAccountOut])
 async def list_accounts(user_id: SupabaseUserId, db: DbSession) -> list[BrokerAccount]:
     result = await db.scalars(

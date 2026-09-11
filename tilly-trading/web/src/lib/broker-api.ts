@@ -16,9 +16,25 @@ export async function pingBackend(): Promise<string> {
   try {
     const res = await fetch(`${API_URL}/health`, { method: "GET" });
     const body = await res.text();
-    return `HTTP ${res.status} · ${body.slice(0, 120)}`;
+    return `GET ${res.status} · ${body.slice(0, 120)}`;
   } catch (e) {
-    return `fetch failed: ${e instanceof Error ? e.message : String(e)}`;
+    return `GET failed: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+/** Diagnostic: authenticated POST (same auth+CORS path as linking, but instant). */
+export async function pingAuthedPost(): Promise<string> {
+  if (!brokerApiConfigured) return "NEXT_PUBLIC_API_URL not set";
+  try {
+    const res = await fetch(`${API_URL}/api/v1/broker/ping`, {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({}),
+    });
+    const body = await res.text();
+    return `POST ${res.status} · ${body.slice(0, 160)}`;
+  } catch (e) {
+    return `POST failed: ${e instanceof Error ? e.message : String(e)}`;
   }
 }
 

@@ -5,7 +5,13 @@ import { useCallback, useEffect, useState } from "react";
 import { ConsoleShell, SectionTitle } from "@/components/console-shell";
 import { useAuth } from "@/components/auth-provider";
 import { fetchBrokerAccounts } from "@/lib/db";
-import { API_URL, brokerApiConfigured, linkBroker, pingBackend } from "@/lib/broker-api";
+import {
+  API_URL,
+  brokerApiConfigured,
+  linkBroker,
+  pingAuthedPost,
+  pingBackend,
+} from "@/lib/broker-api";
 import { displayName, isAdmin } from "@/lib/roles";
 import type { BrokerAccountRow } from "@/lib/supabase";
 
@@ -268,16 +274,28 @@ function LinkBrokerForm({ onDone }: { onDone: () => void }) {
       <div className="rounded-md border border-line bg-ink p-2">
         <div className="font-mono text-[9px] tracking-widest text-muted">API</div>
         <div className="break-all font-mono text-[10px] text-fg">{API_URL || "(not set)"}</div>
-        <button
-          type="button"
-          onClick={async () => {
-            setPing("testing…");
-            setPing(await pingBackend());
-          }}
-          className="mt-1 rounded border border-line bg-panel2 px-2 py-1 font-mono text-[10px] text-amber"
-        >
-          Test backend
-        </button>
+        <div className="mt-1 flex gap-2">
+          <button
+            type="button"
+            onClick={async () => {
+              setPing("testing…");
+              setPing(await pingBackend());
+            }}
+            className="rounded border border-line bg-panel2 px-2 py-1 font-mono text-[10px] text-amber"
+          >
+            Test GET
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              setPing("testing…");
+              setPing(await pingAuthedPost());
+            }}
+            className="rounded border border-line bg-panel2 px-2 py-1 font-mono text-[10px] text-amber"
+          >
+            Test authed POST
+          </button>
+        </div>
         {ping && <div className="mt-1 break-all font-mono text-[10px] text-up">{ping}</div>}
       </div>
       <div className="grid grid-cols-2 gap-2">
