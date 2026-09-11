@@ -8,20 +8,26 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import bcrypt
 import jwt
-from passlib.context import CryptContext
 
 from app.core.config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def _encode(password: str) -> bytes:
+    # bcrypt only uses the first 72 bytes; truncate to stay within that limit.
+    return password.encode("utf-8")[:72]
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(_encode(password), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return bcrypt.checkpw(_encode(plain_password), hashed_password.encode("utf-8"))
+    except ValueError:
+        return False
 
 
 def _create_token(subject: str, expires_delta: timedelta, token_type: str) -> str:

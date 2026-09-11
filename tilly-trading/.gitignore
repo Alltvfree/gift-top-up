@@ -3,6 +3,10 @@
 .env.local
 *.env
 
+# SQLite (local dev database)
+*.db
+*.sqlite3
+
 # Python
 __pycache__/
 *.py[cod]
@@ -24,7 +28,7 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # Editors / OS
-.vscode/
+# NOTE: .vscode/ is intentionally tracked — it ships the run/debug configs.
 .idea/
 .DS_Store
 Thumbs.db

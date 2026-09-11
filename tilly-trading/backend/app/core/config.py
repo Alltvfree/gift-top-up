@@ -22,8 +22,16 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
 
     # ----- Database -----
-    database_url: str = "postgresql+asyncpg://tilly:tilly@localhost:5432/tilly"
-    database_url_sync: str = "postgresql+psycopg2://tilly:tilly@localhost:5432/tilly"
+    # Defaults to a local SQLite file so the app runs with zero external
+    # services. Docker Compose overrides these with the Postgres URLs.
+    database_url: str = "sqlite+aiosqlite:///./tilly.db"
+    database_url_sync: str = "sqlite:///./tilly.db"
+    # Set true for hosted Postgres that requires SSL (Supabase, RDS, etc.).
+    database_ssl: bool = False
+    # Set true when using the Supabase connection pooler (pgBouncer, port 6543).
+    database_pgbouncer: bool = False
+    # Echo every SQL statement (very verbose) — off by default.
+    db_echo: bool = False
 
     # ----- Redis / Celery -----
     redis_url: str = "redis://localhost:6379/0"

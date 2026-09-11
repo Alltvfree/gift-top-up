@@ -4,8 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
@@ -15,7 +14,7 @@ class Order(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "orders"
 
     bot_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"), nullable=False
+        Uuid(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"), nullable=False
     )
     broker_order_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)

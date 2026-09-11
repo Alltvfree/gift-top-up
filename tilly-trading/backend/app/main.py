@@ -9,11 +9,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import __version__
 from app.api.v1.router import api_router
 from app.core.config import settings
+from app.db.init_db import init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup / shutdown hooks (broker pools, warm caches) attach here later.
+    # Create tables (if missing) and seed AI presets so local dev needs no
+    # manual migration step. Production can rely on Alembic instead.
+    await init_db()
     yield
 
 

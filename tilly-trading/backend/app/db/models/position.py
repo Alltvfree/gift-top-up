@@ -4,8 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, UUIDMixin
@@ -15,7 +14,7 @@ class Position(UUIDMixin, Base):
     __tablename__ = "positions"
 
     bot_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"), nullable=False
+        Uuid(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"), nullable=False
     )
     broker_position_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)

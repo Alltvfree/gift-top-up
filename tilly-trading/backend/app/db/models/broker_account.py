@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, Numeric, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, ForeignKey, Numeric, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
@@ -14,7 +13,7 @@ class BrokerAccount(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "broker_accounts"
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     broker_name: Mapped[str] = mapped_column(String(50), nullable=False)  # exness, xm, vantage
     account_id: Mapped[str] = mapped_column(String(100), nullable=False)  # broker-side id
