@@ -1,0 +1,86 @@
+# Render blueprint for the Tilly Trading backend (API) + bot-runner worker.
+# Deploy: Render Dashboard → New → Blueprint → point at this repo.
+# Postgres is Supabase (external), set via DATABASE_URL env vars below.
+#
+# Required secrets (set in the Render dashboard, marked sync:false):
+#   DATABASE_URL          postgresql+asyncpg://postgres.<ref>:<pw>@<pooler-host>:5432/postgres
+#   SUPABASE_JWT_SECRET   Supabase → Project Settings → API → JWT Secret
+#   METAAPI_TOKEN         from app.metaapi.cloud
+services:
+  - type: web
+    name: tilly-api
+    runtime: docker
+    dockerfilePath: ./tilly-trading/backend/Dockerfile
+    dockerContext: ./tilly-trading/backend
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SSL
+        value: "true"
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        value: https://vvkddynlfgilymzvugfo.supabase.co
+      - key: METAAPI_TOKEN
+        sync: false
+      - key: METAAPI_REGION
+        value: new-york
+      - key: CORS_ORIGINS
+        value: https://gift-top-up1.pages.dev,http://localhost:3000
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: tilly-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: tilly-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: tilly-redis
+          property: connectionString
+
+  - type: worker
+    name: tilly-worker
+    runtime: docker
+    dockerfilePath: ./tilly-trading/backend/Dockerfile
+    dockerContext: ./tilly-trading/backend
+    plan: starter
+    dockerCommand: celery -A app.tasks.celery_app.celery_app worker --beat --pool=solo --loglevel=info
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SSL
+        value: "true"
+      - key: METAAPI_TOKEN
+        sync: false
+      - key: METAAPI_REGION
+        value: new-york
+      - key: ENGINE_TICK_SECONDS
+        value: "15"
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: tilly-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: tilly-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: tilly-redis
+          property: connectionString
+
+  - type: redis
+    name: tilly-redis
+    plan: starter
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
