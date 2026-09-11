@@ -7,6 +7,8 @@ DATABASE_PGBOUNCER=true so asyncpg disables server-side prepared statements.
 """
 from __future__ import annotations
 
+import ssl
+
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -21,7 +23,13 @@ _is_asyncpg = "asyncpg" in settings.database_url
 connect_args: dict = {}
 if _is_asyncpg:
     if settings.database_ssl:
-        connect_args["ssl"] = True
+        # Encrypt the connection but do not verify the certificate chain — this
+        # matches Supabase's `sslmode=require` (their pooler presents a chain
+        # Python's default verifier rejects as self-signed).
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        connect_args["ssl"] = ssl_ctx
     if settings.database_pgbouncer:
         # pgBouncer transaction pooling is incompatible with prepared-statement caching.
         connect_args["statement_cache_size"] = 0
