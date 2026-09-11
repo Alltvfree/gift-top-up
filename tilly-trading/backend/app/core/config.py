@@ -45,6 +45,8 @@ class Settings(BaseSettings):
 
     # ----- CORS ----- (comma-separated string; see cors_origins_list)
     cors_origins: str = "http://localhost:3000"
+    # Optional regex to also allow (e.g. Cloudflare Pages preview subdomains).
+    cors_origin_regex: str = ""
 
     # ----- Supabase (server-side) -----
     # JWT secret from Supabase → Project Settings → API → JWT Secret.

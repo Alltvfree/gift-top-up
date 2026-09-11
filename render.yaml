@@ -29,6 +29,8 @@ services:
         value: new-york
       - key: CORS_ORIGINS
         value: https://gift-top-up1.pages.dev,http://localhost:3000
+      - key: CORS_ORIGIN_REGEX
+        value: 'https://([a-z0-9-]+\.)?gift-top-up1\.pages\.dev'
       - key: REDIS_URL
         fromService:
           type: redis
