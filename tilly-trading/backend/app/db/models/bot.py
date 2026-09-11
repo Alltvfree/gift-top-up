@@ -13,9 +13,8 @@ from app.db.base import Base, TimestampMixin, UUIDMixin
 class Bot(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "bots"
 
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    # References auth.users(id) in Supabase (plain UUID; no local FK).
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
     broker_account_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("broker_accounts.id"), nullable=True
     )
@@ -29,7 +28,6 @@ class Bot(UUIDMixin, TimestampMixin, Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    user = relationship("User", back_populates="bots")
     broker_account = relationship("BrokerAccount", back_populates="bots")
     orders = relationship("Order", back_populates="bot", cascade="all, delete-orphan")
     positions = relationship("Position", back_populates="bot", cascade="all, delete-orphan")

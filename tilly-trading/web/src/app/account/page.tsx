@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ConsoleShell, SectionTitle } from "@/components/console-shell";
 import { useAuth } from "@/components/auth-provider";
 import { fetchBrokerAccounts } from "@/lib/db";
+import { brokerApiConfigured, linkBroker } from "@/lib/broker-api";
 import { displayName, isAdmin } from "@/lib/roles";
 import type { BrokerAccountRow } from "@/lib/supabase";
 
@@ -20,7 +21,17 @@ function Account() {
   const { user, signOut, changePassword } = useAuth();
   const [accounts, setAccounts] = useState<BrokerAccountRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showLink, setShowLink] = useState(false);
   const admin = isAdmin(user);
+
+  const loadAccounts = useCallback(async () => {
+    setLoading(true);
+    try {
+      setAccounts(await fetchBrokerAccounts());
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
@@ -50,10 +61,8 @@ function Account() {
   }
 
   useEffect(() => {
-    fetchBrokerAccounts()
-      .then(setAccounts)
-      .finally(() => setLoading(false));
-  }, []);
+    loadAccounts();
+  }, [loadAccounts]);
 
   return (
     <>
@@ -133,17 +142,32 @@ function Account() {
       </section>
 
       <section>
-        <SectionTitle
-          title="MY BROKER ACCOUNTS"
-          meta={loading ? "…" : `${accounts.length} LINKED`}
-        />
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="font-mono text-xs tracking-widest text-muted">MY BROKER ACCOUNTS</h2>
+          <button
+            onClick={() => setShowLink((v) => !v)}
+            className="rounded border border-amber/40 bg-amber/10 px-2 py-1 font-mono text-[10px] font-semibold text-amber"
+          >
+            {showLink ? "CLOSE" : "+ LINK"}
+          </button>
+        </div>
+
+        {showLink && (
+          <LinkBrokerForm
+            onDone={() => {
+              setShowLink(false);
+              loadAccounts();
+            }}
+          />
+        )}
+
         {loading ? (
           <div className="h-16 animate-pulse rounded-lg border border-line bg-panel" />
         ) : accounts.length === 0 ? (
           <div className="rounded-lg border border-dashed border-line bg-panel/50 p-5 text-center">
             <div className="font-mono text-sm font-semibold text-fg">No accounts linked</div>
             <p className="mx-auto mt-1 max-w-[260px] text-[11px] text-muted">
-              Link an Exness / XM / Vantage account via MetaAPI to trade (Task 3).
+              Link an Exness / XM / Vantage MetaTrader account to trade.
             </p>
           </div>
         ) : (
@@ -152,7 +176,7 @@ function Account() {
               <div key={a.id} className="rounded-lg border border-line bg-panel p-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className={`size-2 rounded-full ${a.is_active ? "bg-up" : "bg-muted"}`} />
+                    <span className={`size-2 rounded-full ${statusDot(a.status, a.is_active)}`} />
                     <span className="font-mono text-sm font-semibold text-fg">
                       {a.broker_name.toUpperCase()}
                     </span>
@@ -164,7 +188,13 @@ function Account() {
                     {a.balance != null ? `$${Number(a.balance).toLocaleString()}` : "—"}
                   </span>
                 </div>
-                <div className="mt-2 font-mono text-[10px] text-muted">LOGIN {a.account_id}</div>
+                <div className="mt-2 flex items-center justify-between font-mono text-[10px] text-muted">
+                  <span>LOGIN {a.account_id}</span>
+                  <span className="uppercase">{a.status ?? (a.is_active ? "connected" : "—")}</span>
+                </div>
+                {a.last_error && (
+                  <div className="mt-1 truncate font-mono text-[10px] text-down">{a.last_error}</div>
+                )}
               </div>
             ))}
           </div>
@@ -180,5 +210,104 @@ function Meta({ label, value }: { label: string; value: string }) {
       <div className="font-mono text-sm font-semibold text-fg">{value}</div>
       <div className="mt-0.5 font-mono text-[10px] tracking-wide text-muted">{label}</div>
     </div>
+  );
+}
+
+function statusDot(status: string | null, active: boolean): string {
+  if (status === "connected" || active) return "bg-up";
+  if (status === "error") return "bg-down";
+  if (status === "provisioning") return "bg-amber pulse-dot";
+  return "bg-muted";
+}
+
+function LinkBrokerForm({ onDone }: { onDone: () => void }) {
+  const [broker, setBroker] = useState("exness");
+  const [login, setLogin] = useState("");
+  const [password, setPassword] = useState("");
+  const [server, setServer] = useState("");
+  const [platform, setPlatform] = useState<"mt4" | "mt5">("mt5");
+  const [accountType, setAccountType] = useState<"demo" | "live">("demo");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!brokerApiConfigured) {
+    return (
+      <div className="mb-2 rounded-lg border border-amber/30 bg-amber/10 p-3 font-mono text-[11px] text-amber">
+        Backend not connected yet. Set NEXT_PUBLIC_API_URL (your deployed Tilly API) in Cloudflare
+        Pages, then reload to link a broker.
+      </div>
+    );
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await linkBroker({
+        broker_name: broker,
+        login,
+        password,
+        server,
+        platform,
+        account_type: accountType,
+      });
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Linking failed.");
+      setBusy(false);
+    }
+  }
+
+  const field =
+    "h-9 w-full rounded-lg border border-line bg-ink px-3 text-sm text-fg outline-none placeholder:text-muted/50 focus:border-amber/60";
+
+  return (
+    <form onSubmit={submit} className="mb-2 space-y-2 rounded-lg border border-line bg-panel p-3">
+      <div className="grid grid-cols-2 gap-2">
+        <select value={broker} onChange={(e) => setBroker(e.target.value)} className={field}>
+          <option value="exness">Exness</option>
+          <option value="xm">XM</option>
+          <option value="vantage">Vantage</option>
+        </select>
+        <select
+          value={accountType}
+          onChange={(e) => setAccountType(e.target.value as "demo" | "live")}
+          className={field}
+        >
+          <option value="demo">Demo</option>
+          <option value="live">Live</option>
+        </select>
+      </div>
+      <input className={field} placeholder="Login (account number)" value={login} onChange={(e) => setLogin(e.target.value)} />
+      <input className={field} type="password" placeholder="Investor / master password" value={password} onChange={(e) => setPassword(e.target.value)} />
+      <input className={field} placeholder="Server (e.g. Exness-MT5Real8)" value={server} onChange={(e) => setServer(e.target.value)} />
+      <div className="grid grid-cols-2 gap-1 rounded-lg border border-line bg-panel2 p-1">
+        {(["mt5", "mt4"] as const).map((p) => (
+          <button
+            type="button"
+            key={p}
+            onClick={() => setPlatform(p)}
+            className={`rounded-md py-1.5 font-mono text-[10px] uppercase ${
+              platform === p ? "bg-amber font-semibold text-ink" : "text-muted"
+            }`}
+          >
+            {p}
+          </button>
+        ))}
+      </div>
+      {error && (
+        <p className="rounded-md border border-down/30 bg-down/10 px-3 py-2 font-mono text-[10px] text-down">
+          {error}
+        </p>
+      )}
+      <button
+        type="submit"
+        disabled={busy}
+        className="h-9 w-full rounded-lg bg-amber font-mono text-[11px] font-semibold text-ink transition active:scale-[0.98] disabled:opacity-50"
+      >
+        {busy ? "Provisioning… (can take ~1 min)" : "Link account"}
+      </button>
+    </form>
   );
 }

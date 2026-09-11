@@ -277,16 +277,55 @@ Notes:
 ## Build order
 
 1. ✅ **Project scaffolding**
-2. ✅ **Database & auth** — models, register/login/refresh, bcrypt, protected routes
-3. Broker integration — wire `MetaAPIClient`, account linking, test on an Exness demo
-4. Bot engine core — Celery-backed runner, live start/stop/pause loop ← _next_
+2. ✅ **Database & auth** — Supabase Auth + RLS (web), local JWT (dev API)
+3. ✅ **Broker integration** — MetaAPI account linking (`/api/v1/broker/link`)
+4. ✅ **Bot engine core** — Celery worker + beat drives running bots via MetaAPI
 5. API endpoints — WebSocket price relay from the broker, remaining validation
-6. Web frontend — bot creation wizard, TradingView charts, live tables
-7. AI presets — "Generate with AI" in the wizard, optional backtest engine
-8. Deployment — CI/CD, domain + SSL
+6. Web frontend — TradingView charts, richer live tables
+7. AI presets — ✅ generator + wizard; optional backtest engine remains
+8. Deployment — ✅ Cloudflare Pages (web) + Render blueprint (API/worker); CI/CD remains
 
-> Bot CRUD + start/stop (parts of Tasks 4–5) already work against the DB; what's left
-> for Task 4 is driving them with a live broker loop.
+---
+
+## Live trading: backend API + bot runner (Tasks 3–4)
+
+The web app is Supabase-direct, but **live broker trading needs a server** (the MetaAPI
+token must stay server-side, and a 24/5 loop can't run on Cloudflare Pages). That's the
+`backend/` service — a FastAPI API + a Celery worker — deployed together and pointed at
+your Supabase database.
+
+**Task 3 — broker linking.** `POST /api/v1/broker/link` (authenticated with the caller's
+Supabase access token, verified via `SUPABASE_JWT_SECRET`) provisions a MetaAPI account
+from the broker login/password/server, stores the resulting `metaapi_account_id` in
+`broker_accounts`, and returns it. **The broker password is never stored.** The web app's
+Account page has the **+ LINK** form that calls this.
+
+**Task 4 — bot runner.** The Celery worker runs `celery … worker --beat --pool=solo`. Every
+`ENGINE_TICK_SECONDS` the engine (`app/services/engine.py`) loads bots with
+`status = 'running'`, connects each to its broker, runs the strategy
+(`initialize()` places the grid/DCA orders, `on_tick()` maintains them), and syncs open
+positions + P&L back into Supabase. Start/stop stays Supabase-direct from the UI — the
+worker reacts to the status change. Run it as a **single process** so live bot state and
+broker connections persist between ticks.
+
+### Deploy (Render blueprint)
+
+`render.yaml` defines the API (web), the worker, and Redis. In Render → **New → Blueprint**,
+point at this repo, then set these secrets on **both** the API and worker services:
+
+| Secret | Where to get it |
+| ------ | --------------- |
+| `DATABASE_URL` | Supabase session-pooler URI, `postgresql+asyncpg://…` |
+| `SUPABASE_JWT_SECRET` | Supabase → Project Settings → API → JWT Secret (API service) |
+| `METAAPI_TOKEN` | app.metaapi.cloud → Tokens |
+
+Run migration [`supabase/migrations/0003_broker_provisioning.sql`](./supabase/migrations/0003_broker_provisioning.sql)
+in the Supabase SQL editor first (adds broker provisioning columns). Then set
+`NEXT_PUBLIC_API_URL` in Cloudflare Pages to the deployed API URL so the **+ LINK** form works.
+
+> ⚠️ Trading is real once a **live** broker account is linked. Test with **demo** accounts
+> first. Run the worker single-instance (`--pool=solo`); scaling to multiple workers needs a
+> distributed lock (not yet implemented).
 
 ---
 

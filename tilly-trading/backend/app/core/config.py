@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,25 +43,32 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
 
-    # ----- CORS -----
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    # ----- CORS ----- (comma-separated string; see cors_origins_list)
+    cors_origins: str = "http://localhost:3000"
+
+    # ----- Supabase (server-side) -----
+    # JWT secret from Supabase → Project Settings → API → JWT Secret.
+    # Used to verify access tokens sent by the web app to this API.
+    supabase_jwt_secret: str = ""
+    supabase_url: str = ""
 
     # ----- Broker (MetaAPI) -----
     metaapi_token: str = ""
     metaapi_region: str = "new-york"
     metaapi_default_account_id: str = ""
+    metaapi_platform: str = "mt5"  # mt4 | mt5
+
+    # ----- Bot engine -----
+    # Seconds between engine ticks (dispatch + on_tick) in the Celery beat loop.
+    engine_tick_seconds: int = 15
 
     # ----- AI presets (optional) -----
     openai_api_key: str = ""
     anthropic_api_key: str = ""
 
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def _split_cors(cls, value: object) -> object:
-        """Allow a comma-separated string in the env file."""
-        if isinstance(value, str):
-            return [origin.strip() for origin in value.split(",") if origin.strip()]
-        return value
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 @lru_cache

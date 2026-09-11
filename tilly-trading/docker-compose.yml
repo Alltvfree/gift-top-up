@@ -82,7 +82,16 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
-    command: ["celery", "-A", "app.tasks.celery_app.celery_app", "worker", "--loglevel=info"]
+    # --beat runs the scheduler in-process; --pool=solo keeps the engine's live
+    # bot state + broker connections in one process.
+    command:
+      - celery
+      - -A
+      - app.tasks.celery_app.celery_app
+      - worker
+      - --beat
+      - --pool=solo
+      - --loglevel=info
 
   web:
     build:
