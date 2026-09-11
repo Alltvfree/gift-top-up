@@ -8,7 +8,7 @@
       "module": "uvicorn",
       "args": ["app.main:app", "--reload", "--port", "8000"],
       "cwd": "${workspaceFolder}/backend",
-      "envFile": "${workspaceFolder}/.env",
+      "envFile": "${workspaceFolder}/backend/.env",
       "jinja": true,
       "console": "integratedTerminal"
     },
