@@ -1,0 +1,72 @@
+# Tilly Trading — self-host the backend API + bot worker on your own server.
+# Database is Supabase (external), so no local Postgres here — just Redis +
+# the FastAPI API + the Celery worker/beat.
+#
+# Usage on your Ubuntu server:
+#   git clone https://github.com/Alltvfree/gift-top-up
+#   cd gift-top-up/tilly-trading
+#   cp .env.selfhost.example .env.selfhost   # then fill in the secrets
+#   docker compose -f docker-compose.selfhost.yml up -d --build
+#
+# The API binds to 127.0.0.1:8000 only — it is NOT exposed publicly; your
+# Cloudflare Tunnel (cloudflared) reverse-proxies a hostname to it.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: tilly_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - tilly_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+    container_name: tilly_api
+    restart: unless-stopped
+    env_file:
+      - .env.selfhost
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    # Bind to localhost only; cloudflared connects to this.
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  worker:
+    build:
+      context: ./backend
+    container_name: tilly_worker
+    restart: unless-stopped
+    env_file:
+      - .env.selfhost
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    depends_on:
+      redis:
+        condition: service_healthy
+    # Single process (--pool=solo) keeps live bot state + broker connections.
+    command:
+      - celery
+      - -A
+      - app.tasks.celery_app.celery_app
+      - worker
+      - --beat
+      - --pool=solo
+      - --loglevel=info
+
+volumes:
+  tilly_redis:

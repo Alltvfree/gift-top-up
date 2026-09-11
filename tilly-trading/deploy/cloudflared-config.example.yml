@@ -1,0 +1,26 @@
+# Example Cloudflare Tunnel ingress for the Tilly API.
+#
+# You already run a tunnel with other services, so MERGE the `tilly-api`
+# hostname block into your existing ~/.cloudflared/config.yml ingress list
+# (keep your current entries; the `http_status:404` catch-all must stay LAST).
+#
+# Prefer the dashboard? Zero Trust → Networks → Tunnels → (your tunnel) →
+# Public Hostname → Add a public hostname:
+#     Subdomain: tilly-api      Domain: <your-domain>
+#     Service:   HTTP  →  localhost:8000
+# That does the same thing without editing this file.
+
+tunnel: <YOUR_TUNNEL_ID>
+credentials-file: /root/.cloudflared/<YOUR_TUNNEL_ID>.json
+
+ingress:
+  # ---- Tilly API (new) ----
+  - hostname: tilly-api.example.com          # ← your real hostname
+    service: http://localhost:8000
+
+  # ---- your existing services stay here ----
+  # - hostname: something-else.example.com
+  #   service: http://localhost:PORT
+
+  # catch-all MUST be last
+  - service: http_status:404

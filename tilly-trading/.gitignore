@@ -1,6 +1,7 @@
 # Env
 .env
 .env.local
+.env.selfhost
 *.env
 
 # SQLite (local dev database)
