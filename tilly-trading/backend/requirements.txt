@@ -2,7 +2,8 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.20
-websockets==14.1
+# websockets is pulled by uvicorn[standard]; left unpinned so it can satisfy
+# metaapi-cloud-sdk's (<12) constraint.
 
 # ---- Data / validation ----
 pydantic==2.10.4
@@ -25,8 +26,8 @@ email-validator==2.2.0
 redis==5.2.1
 celery==5.4.0
 
-# ---- Broker integration ----
-metaapi-cloud-sdk==27.0.0
+# ---- Broker integration ---- (29.x uses modern deps with py3.11 wheels)
+metaapi-cloud-sdk==29.1.1
 
 # ---- HTTP client ----
 httpx==0.28.1
