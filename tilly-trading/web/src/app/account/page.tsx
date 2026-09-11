@@ -17,10 +17,37 @@ export default function AccountPage() {
 }
 
 function Account() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, changePassword } = useAuth();
   const [accounts, setAccounts] = useState<BrokerAccountRow[]>([]);
   const [loading, setLoading] = useState(true);
   const admin = isAdmin(user);
+
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    setPwMsg(null);
+    if (pw.length < 6) {
+      setPwMsg({ ok: false, text: "Password must be at least 6 characters." });
+      return;
+    }
+    if (pw !== pw2) {
+      setPwMsg({ ok: false, text: "Passwords do not match." });
+      return;
+    }
+    setPwBusy(true);
+    const { error } = await changePassword(pw);
+    setPwBusy(false);
+    if (error) setPwMsg({ ok: false, text: error });
+    else {
+      setPwMsg({ ok: true, text: "Password updated." });
+      setPw("");
+      setPw2("");
+    }
+  }
 
   useEffect(() => {
     fetchBrokerAccounts()
@@ -66,6 +93,44 @@ function Account() {
           <span className="text-amber">→</span>
         </Link>
       )}
+
+      <section className="rounded-xl border border-line bg-panel p-4">
+        <SectionTitle title="CHANGE PASSWORD" />
+        <form onSubmit={handleChangePassword} className="space-y-2.5">
+          <input
+            type="password"
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            placeholder="New password"
+            className="h-10 w-full rounded-lg border border-line bg-ink px-3 text-sm text-fg outline-none placeholder:text-muted/50 focus:border-amber/60"
+          />
+          <input
+            type="password"
+            value={pw2}
+            onChange={(e) => setPw2(e.target.value)}
+            placeholder="Confirm new password"
+            className="h-10 w-full rounded-lg border border-line bg-ink px-3 text-sm text-fg outline-none placeholder:text-muted/50 focus:border-amber/60"
+          />
+          {pwMsg && (
+            <p
+              className={`rounded-md border px-3 py-2 font-mono text-[11px] ${
+                pwMsg.ok
+                  ? "border-up/30 bg-up/10 text-up"
+                  : "border-down/30 bg-down/10 text-down"
+              }`}
+            >
+              {pwMsg.text}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={pwBusy}
+            className="h-10 w-full rounded-lg bg-amber font-mono text-[12px] font-semibold text-ink transition active:scale-[0.98] disabled:opacity-50"
+          >
+            {pwBusy ? "Updating…" : "Update password"}
+          </button>
+        </form>
+      </section>
 
       <section>
         <SectionTitle

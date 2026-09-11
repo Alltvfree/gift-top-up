@@ -15,6 +15,7 @@ interface AuthContextValue {
     fullName?: string,
   ) => Promise<{ error: string | null; needsConfirmation: boolean }>;
   signOut: () => Promise<void>;
+  changePassword: (newPassword: string) => Promise<{ error: string | null }>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -55,6 +56,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     signOut: async () => {
       await supabase.auth.signOut();
+    },
+    changePassword: async (newPassword: string) => {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      return { error: error?.message ?? null };
     },
   };
 

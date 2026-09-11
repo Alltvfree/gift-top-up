@@ -10,7 +10,8 @@ import type { User } from "@supabase/supabase-js";
  * same role claim.
  */
 const ADMIN_EMAILS = (
-  process.env.NEXT_PUBLIC_ADMIN_EMAILS || "mohamed.shuhail96@gmail.com"
+  process.env.NEXT_PUBLIC_ADMIN_EMAILS ||
+  "mohamed.shuhail96@gmail.com,ammadey.saif.sm@gmail.com"
 )
   .split(",")
   .map((s) => s.trim().toLowerCase())
