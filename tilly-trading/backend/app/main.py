@@ -34,9 +34,12 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
     allow_origin_regex=settings.cors_origin_regex or None,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # No cookies are used (auth is a bearer token), so credentials stay off —
+    # which lets the browser accept the explicit header list below on preflight.
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    # "Authorization" must be listed explicitly; a "*" wildcard does not cover it.
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin"],
 )
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)
