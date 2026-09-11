@@ -72,6 +72,15 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
+    @property
+    def metaapi_region_safe(self) -> str:
+        """A sane MetaAPI region id, guarding against a mis-set env value
+        (e.g. the token accidentally pasted into METAAPI_REGION)."""
+        r = (self.metaapi_region or "").strip()
+        if not r or r.startswith("eyJ") or len(r) > 40:
+            return "new-york"
+        return r
+
 
 @lru_cache
 def get_settings() -> Settings:

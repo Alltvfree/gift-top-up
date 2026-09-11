@@ -37,7 +37,7 @@ async def provision_account(
     token = token or settings.metaapi_token
     if not token:
         raise RuntimeError("METAAPI_TOKEN is not configured on the server.")
-    region = region or settings.metaapi_region
+    region = region or settings.metaapi_region_safe
     platform = platform or settings.metaapi_platform
 
     api = MetaApi(token, {"region": region})

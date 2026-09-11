@@ -23,7 +23,7 @@ class MetaAPIClient(BrokerClient):
         region: str | None = None,
     ) -> None:
         self.token = token or settings.metaapi_token
-        self.region = region or settings.metaapi_region
+        self.region = region or settings.metaapi_region_safe
         self.account_id = account_id
         self.api = None
         self.account = None
