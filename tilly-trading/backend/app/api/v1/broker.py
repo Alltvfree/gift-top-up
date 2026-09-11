@@ -86,9 +86,15 @@ async def link_account(
         status="provisioning",
         is_active=False,
     )
-    db.add(account)
-    await db.commit()
-    await db.refresh(account)
+    try:
+        db.add(account)
+        await db.commit()
+        await db.refresh(account)
+    except Exception as exc:  # noqa: BLE001 - surface DB errors with CORS headers
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {type(exc).__name__}: {exc}",
+        ) from exc
 
     background.add_task(
         _provision_and_update,

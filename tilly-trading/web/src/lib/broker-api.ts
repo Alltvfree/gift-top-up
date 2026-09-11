@@ -22,6 +22,17 @@ export async function pingBackend(): Promise<string> {
   }
 }
 
+/** Diagnostic: check the backend's database connection. */
+export async function pingDB(): Promise<string> {
+  if (!brokerApiConfigured) return "NEXT_PUBLIC_API_URL not set";
+  try {
+    const res = await fetch(`${API_URL}/dbcheck`, { method: "GET" });
+    return `DB ${res.status} · ${(await res.text()).slice(0, 220)}`;
+  } catch (e) {
+    return `DB check failed: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
 /** Diagnostic: authenticated POST (same auth+CORS path as linking, but instant). */
 export async function pingAuthedPost(): Promise<string> {
   if (!brokerApiConfigured) return "NEXT_PUBLIC_API_URL not set";

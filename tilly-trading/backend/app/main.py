@@ -57,4 +57,19 @@ async def root() -> dict:
 @app.get("/health", tags=["meta"])
 async def health() -> dict:
     # `build` is bumped on deploys we need to confirm are live.
-    return {"status": "ok", "environment": settings.environment, "build": "async1"}
+    return {"status": "ok", "environment": settings.environment, "build": "db1"}
+
+
+@app.get("/dbcheck", tags=["meta"])
+async def dbcheck() -> dict:
+    """Test the database connection and return the real error (CORS-safe)."""
+    from sqlalchemy import text
+
+    from app.db.session import engine
+
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("select 1"))
+        return {"db": "ok"}
+    except Exception as exc:  # noqa: BLE001
+        return {"db": "error", "type": type(exc).__name__, "detail": str(exc)[:400]}

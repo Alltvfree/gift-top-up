@@ -11,6 +11,7 @@ import {
   linkBroker,
   pingAuthedPost,
   pingBackend,
+  pingDB,
 } from "@/lib/broker-api";
 import { displayName, isAdmin } from "@/lib/roles";
 import type { BrokerAccountRow } from "@/lib/supabase";
@@ -302,6 +303,16 @@ function LinkBrokerForm({ onDone }: { onDone: () => void }) {
             className="rounded border border-line bg-panel2 px-2 py-1 font-mono text-[10px] text-amber"
           >
             Test authed POST
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              setPing("testing…");
+              setPing(await pingDB());
+            }}
+            className="rounded border border-line bg-panel2 px-2 py-1 font-mono text-[10px] text-amber"
+          >
+            Test DB
           </button>
         </div>
         {ping && <div className="mt-1 break-all font-mono text-[10px] text-up">{ping}</div>}
