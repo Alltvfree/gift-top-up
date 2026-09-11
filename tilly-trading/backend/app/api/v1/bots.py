@@ -96,7 +96,7 @@ async def stop_bot(bot_id: uuid.UUID, current_user: CurrentUser, db: DbSession) 
 
 
 @router.delete("/{bot_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_bot(bot_id: uuid.UUID, current_user: CurrentUser, db: DbSession) -> None:
+async def delete_bot(bot_id: uuid.UUID, current_user: CurrentUser, db: DbSession):
     bot = await _get_owned_bot(bot_id, current_user.id, db)
     await db.delete(bot)
     await db.commit()

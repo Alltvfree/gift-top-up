@@ -82,7 +82,7 @@ async def link_account(
 
 
 @router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def unlink_account(account_id: uuid.UUID, user_id: SupabaseUserId, db: DbSession) -> None:
+async def unlink_account(account_id: uuid.UUID, user_id: SupabaseUserId, db: DbSession):
     account = await db.get(BrokerAccount, account_id)
     if account is None or account.user_id != user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
