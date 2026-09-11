@@ -168,10 +168,10 @@ function Dashboard() {
           + New Bot
         </Link>
         <Link
-          href="/admin"
+          href="/account"
           className="grid h-12 place-items-center rounded-lg border border-line bg-panel text-sm font-medium text-fg transition active:scale-[0.98]"
         >
-          Accounts
+          Account
         </Link>
       </section>
     </>

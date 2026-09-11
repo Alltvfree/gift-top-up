@@ -11,7 +11,7 @@ const NAV = [
   { to: "/signals", glyph: "◈", label: "Signals" },
   { to: "/trades", glyph: "⇄", label: "Trades" },
   { to: "/risk", glyph: "⚙", label: "Risk" },
-  { to: "/admin", glyph: "☰", label: "Admin" },
+  { to: "/account", glyph: "◉", label: "Account" },
 ] as const;
 
 function initials(email?: string | null) {
