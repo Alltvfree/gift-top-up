@@ -1,0 +1,103 @@
+version: "3.9"
+
+# Tilly Trading — local development stack
+# PostgreSQL 15 + Redis 7 + FastAPI backend + Celery worker + Next.js web
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: tilly_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tilly}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tilly}
+      POSTGRES_DB: ${POSTGRES_DB:-tilly}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - tilly_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tilly} -d ${POSTGRES_DB:-tilly}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: tilly_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - tilly_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: tilly_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Override host-based URLs so containers talk over the compose network
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tilly}:${POSTGRES_PASSWORD:-tilly}@db:5432/${POSTGRES_DB:-tilly}
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: tilly_worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tilly}:${POSTGRES_PASSWORD:-tilly}@db:5432/${POSTGRES_DB:-tilly}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    depends_on:
+      backend:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: ["celery", "-A", "app.tasks.celery_app.celery_app", "worker", "--loglevel=info"]
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: tilly_web
+    restart: unless-stopped
+    environment:
+      # Browser-side calls hit the host-published backend port
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - backend
+
+volumes:
+  tilly_pgdata:
+  tilly_redisdata:

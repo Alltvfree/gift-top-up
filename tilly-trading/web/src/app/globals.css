@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    border-color: theme("colors.line");
+  }
+
+  body {
+    background-color: theme("colors.ink");
+    color: theme("colors.fg");
+    font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@layer utilities {
+  /* Console animation helpers (bare class names, matching the design system). */
+  .tick-live {
+    animation: flick 1.4s ease-in-out infinite;
+  }
+  .pulse-dot {
+    animation: pulsering 1.8s ease-out infinite;
+  }
+  .sweep {
+    animation: sweep 3.2s linear infinite;
+  }
+}
+
+@keyframes flick {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes pulsering {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 176, 32, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 5px rgba(255, 176, 32, 0);
+  }
+}
+@keyframes sweep {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(360%);
+  }
+}
