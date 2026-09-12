@@ -6,6 +6,7 @@ import { ConsoleShell, SectionTitle } from "@/components/console-shell";
 import { useAuth } from "@/components/auth-provider";
 import { fetchBrokerAccounts } from "@/lib/db";
 import {
+  addPaperAccount,
   API_URL,
   brokerApiConfigured,
   linkBroker,
@@ -29,6 +30,7 @@ function Account() {
   const [accounts, setAccounts] = useState<BrokerAccountRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showLink, setShowLink] = useState(false);
+  const [paperBusy, setPaperBusy] = useState(false);
   const admin = isAdmin(user);
 
   const loadAccounts = useCallback(async () => {
@@ -159,12 +161,31 @@ function Account() {
       <section>
         <div className="mb-2 flex items-center justify-between">
           <h2 className="font-mono text-xs tracking-widest text-muted">MY BROKER ACCOUNTS</h2>
-          <button
-            onClick={() => setShowLink((v) => !v)}
-            className="rounded border border-amber/40 bg-amber/10 px-2 py-1 font-mono text-[10px] font-semibold text-amber"
-          >
-            {showLink ? "CLOSE" : "+ LINK"}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={async () => {
+                setPaperBusy(true);
+                try {
+                  await addPaperAccount();
+                  await loadAccounts();
+                } catch (e) {
+                  alert(e instanceof Error ? e.message : "Failed to add paper account");
+                } finally {
+                  setPaperBusy(false);
+                }
+              }}
+              disabled={paperBusy}
+              className="rounded border border-up/40 bg-up/10 px-2 py-1 font-mono text-[10px] font-semibold text-up disabled:opacity-50"
+            >
+              {paperBusy ? "…" : "+ PAPER"}
+            </button>
+            <button
+              onClick={() => setShowLink((v) => !v)}
+              className="rounded border border-amber/40 bg-amber/10 px-2 py-1 font-mono text-[10px] font-semibold text-amber"
+            >
+              {showLink ? "CLOSE" : "+ LINK"}
+            </button>
+          </div>
         </div>
 
         {showLink && (

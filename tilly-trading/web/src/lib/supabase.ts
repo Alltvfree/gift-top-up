@@ -62,6 +62,7 @@ export interface BrokerAccountRow {
   balance: number | null;
   currency: string;
   is_active: boolean;
+  connection_provider: string | null;
   status: string | null;
   server: string | null;
   platform: string | null;

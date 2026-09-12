@@ -25,8 +25,8 @@ from datetime import datetime, timezone
 from sqlalchemy import delete, select
 
 from app.bots.base import BaseBot
-from app.broker.metaapi_client import MetaAPIClient
-from app.core.config import settings
+from app.broker.base import BrokerClient
+from app.broker.registry import build_broker_for_account
 from app.db.models.bot import Bot
 from app.db.models.broker_account import BrokerAccount
 from app.db.models.position import Position
@@ -40,7 +40,7 @@ logger = logging.getLogger("tilly.engine")
 class RunningBot:
     bot_id: str
     symbol: str
-    broker: MetaAPIClient
+    broker: BrokerClient
     strategy: BaseBot
 
 
@@ -74,9 +74,8 @@ class TradingEngine:
 
     # ---- sync entrypoint for Celery ----
     def tick(self) -> dict:
-        if not settings.metaapi_token:
-            logger.warning("METAAPI_TOKEN not set; engine idle.")
-            return {"status": "idle", "reason": "no_metaapi_token"}
+        # Simulated bots need no MetaAPI token; metaapi bots are guarded per-bot
+        # in build_broker_for_account, so always dispatch.
         return self._loop.run(self._dispatch())
 
     # ---- async logic (runs on the engine loop) ----
@@ -129,10 +128,10 @@ class TradingEngine:
         if bot.broker_account_id is None:
             raise RuntimeError("Bot has no broker account linked.")
         account = await session.get(BrokerAccount, bot.broker_account_id)
-        if account is None or not account.metaapi_account_id:
-            raise RuntimeError("Linked broker account is not provisioned.")
+        if account is None:
+            raise RuntimeError("Linked broker account not found.")
 
-        broker = MetaAPIClient(account_id=account.metaapi_account_id)
+        broker = build_broker_for_account(account)
         await broker.connect()
 
         params = {**(bot.parameters or {}), "symbol": bot.symbol}

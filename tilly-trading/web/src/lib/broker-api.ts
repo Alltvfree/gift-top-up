@@ -67,6 +67,26 @@ async function authHeaders(): Promise<Record<string, string>> {
   };
 }
 
+export async function addPaperAccount(): Promise<void> {
+  if (!brokerApiConfigured) {
+    throw new Error("Backend not configured (NEXT_PUBLIC_API_URL is not set).");
+  }
+  const res = await fetch(`${API_URL}/api/v1/broker/paper`, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: "{}",
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      detail = (await res.json()).detail ?? detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+}
+
 export async function linkBroker(input: LinkBrokerInput): Promise<void> {
   if (!brokerApiConfigured) {
     throw new Error("Backend not configured (NEXT_PUBLIC_API_URL is not set).");

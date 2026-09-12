@@ -23,7 +23,8 @@ class BrokerAccount(UUIDMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     metaapi_account_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    # ----- Provisioning (MetaAPI) -----
+    # ----- Provider / provisioning -----
+    connection_provider: Mapped[str] = mapped_column(String(20), default="metaapi", nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     server: Mapped[str | None] = mapped_column(String(120), nullable=True)
     platform: Mapped[str] = mapped_column(String(10), default="mt5", nullable=False)

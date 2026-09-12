@@ -34,6 +34,7 @@ class BrokerAccountOut(BaseModel):
     broker_name: str
     account_id: str
     account_type: str
+    connection_provider: str
     balance: float | None = None
     currency: str
     is_active: bool

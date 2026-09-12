@@ -63,6 +63,32 @@ async def list_accounts(user_id: SupabaseUserId, db: DbSession) -> list[BrokerAc
     return list(result.all())
 
 
+@router.post("/paper", response_model=BrokerAccountOut, status_code=status.HTTP_201_CREATED)
+async def create_paper_account(user_id: SupabaseUserId, db: DbSession) -> BrokerAccount:
+    """Create a free simulated (paper-trading) account — no broker, no cost."""
+    account = BrokerAccount(
+        user_id=user_id,
+        broker_name="paper",
+        account_id="PAPER",
+        account_type="demo",
+        connection_provider="simulated",
+        balance=10000,
+        currency="USD",
+        status="connected",
+        is_active=True,
+    )
+    try:
+        db.add(account)
+        await db.commit()
+        await db.refresh(account)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {type(exc).__name__}: {exc}",
+        ) from exc
+    return account
+
+
 @router.post("/link", response_model=BrokerAccountOut, status_code=status.HTTP_201_CREATED)
 async def link_account(
     payload: BrokerLinkRequest,
