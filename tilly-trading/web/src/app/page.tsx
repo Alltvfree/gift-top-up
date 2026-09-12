@@ -20,19 +20,30 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [b, p] = await Promise.all([fetchBots(), fetchPositions()]);
       setBots(b);
       setPositions(p);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     load();
+    // Live refresh every 5s (silent = no skeleton flicker) so balance/P&L and
+    // positions update while bots run, without a manual reload.
+    const t = setInterval(() => load(true), 5000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") load(true);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [load]);
 
   async function toggle(bot: BotRow) {

@@ -18,9 +18,22 @@ function Trades() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchPositions()
-      .then(setPositions)
-      .finally(() => setLoading(false));
+    let active = true;
+    const refresh = (silent: boolean) => {
+      fetchPositions()
+        .then((p) => {
+          if (active) setPositions(p);
+        })
+        .finally(() => {
+          if (active && !silent) setLoading(false);
+        });
+    };
+    refresh(false);
+    const t = setInterval(() => refresh(true), 5000);
+    return () => {
+      active = false;
+      clearInterval(t);
+    };
   }, []);
 
   const openPnl = positions.reduce((a, p) => a + Number(p.unrealized_pnl ?? 0), 0);
