@@ -21,6 +21,7 @@ export async function createBot(input: {
   symbol: string;
   parameters: Record<string, unknown>;
   ai_preset_used: string | null;
+  broker_account_id?: string | null;
 }): Promise<BotRow> {
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id;

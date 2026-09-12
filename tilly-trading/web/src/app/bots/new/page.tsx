@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ConsoleShell, SectionTitle } from "@/components/console-shell";
-import { createBot } from "@/lib/db";
+import { createBot, fetchBrokerAccounts } from "@/lib/db";
+import type { BrokerAccountRow } from "@/lib/supabase";
 import { generateParams, type PresetName, type Strategy } from "@/lib/presets";
 
 const SYMBOLS = ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD"];
@@ -29,6 +30,17 @@ function NewBot() {
   const [params, setParams] = useState<Record<string, number | string> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<BrokerAccountRow[]>([]);
+  const [accountId, setAccountId] = useState<string>("");
+
+  useEffect(() => {
+    fetchBrokerAccounts().then((a) => {
+      setAccounts(a);
+      // Default to the first connected account (e.g. the paper account).
+      const connected = a.find((x) => x.status === "connected") ?? a[0];
+      if (connected) setAccountId(connected.id);
+    });
+  }, []);
 
   function handleGenerate() {
     const b = parseFloat(balance);
@@ -46,6 +58,10 @@ function NewBot() {
       setError("Give your bot a name.");
       return;
     }
+    if (!accountId) {
+      setError("Add a broker account first (Account → + PAPER).");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -55,6 +71,7 @@ function NewBot() {
         symbol,
         parameters: params ?? {},
         ai_preset_used: params ? preset : null,
+        broker_account_id: accountId,
       });
       router.push("/");
     } catch (e) {
@@ -118,6 +135,32 @@ function NewBot() {
               </option>
             ))}
           </select>
+        </label>
+
+        <label className="block">
+          <span className="mb-1 block font-mono text-[10px] tracking-widest text-muted">
+            BROKER ACCOUNT
+          </span>
+          {accounts.length === 0 ? (
+            <Link
+              href="/account"
+              className="flex h-10 items-center rounded-lg border border-amber/40 bg-amber/10 px-3 text-[12px] text-amber"
+            >
+              No account — add one (Account → + PAPER) →
+            </Link>
+          ) : (
+            <select
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              className="h-10 w-full rounded-lg border border-line bg-ink px-3 text-sm text-fg outline-none focus:border-amber/60"
+            >
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.broker_name.toUpperCase()} · {a.account_id} ({a.status ?? "?"})
+                </option>
+              ))}
+            </select>
+          )}
         </label>
       </section>
 
