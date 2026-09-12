@@ -38,6 +38,7 @@ export interface BotRow {
   created_at: string;
   started_at: string | null;
   stopped_at: string | null;
+  last_error: string | null;
 }
 
 export interface PositionRow {

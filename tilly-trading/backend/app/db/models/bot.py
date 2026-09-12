@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Numeric, String, Uuid
+from sqlalchemy import JSON, DateTime, ForeignKey, Numeric, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
@@ -27,6 +27,7 @@ class Bot(UUIDMixin, TimestampMixin, Base):
     total_pnl: Mapped[float] = mapped_column(Numeric(15, 2), default=0, nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     broker_account = relationship("BrokerAccount", back_populates="bots")
     orders = relationship("Order", back_populates="bot", cascade="all, delete-orphan")

@@ -108,6 +108,11 @@ function Dashboard() {
                     {Number(b.total_pnl) >= 0 ? "+" : "−"}${Math.abs(Number(b.total_pnl))}
                   </span>
                 </div>
+                {b.status === "error" && b.last_error && (
+                  <div className="mt-2 break-words font-mono text-[10px] text-down">
+                    {b.last_error}
+                  </div>
+                )}
                 <div className="mt-3 flex items-center justify-between">
                   <span className="font-mono text-[10px] uppercase text-muted">{b.status}</span>
                   <button

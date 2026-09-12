@@ -97,10 +97,13 @@ class TradingEngine:
                 if bot_id not in self.running:
                     try:
                         await self._start(bot, session)
+                        bot.last_error = None
+                        await session.commit()
                         started += 1
                     except Exception as exc:  # noqa: BLE001
                         logger.exception("Failed to start bot %s", bot_id)
                         bot.status = "error"
+                        bot.last_error = f"{type(exc).__name__}: {exc}"[:500]
                         await session.commit()
                         errored += 1
 

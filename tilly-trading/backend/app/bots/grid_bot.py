@@ -15,28 +15,39 @@ from app.bots.base import BaseBot
 
 class GridBot(BaseBot):
     async def initialize(self) -> None:
-        self.grid_spacing = (
-            self.params["upper_price"] - self.params["lower_price"]
-        ) / self.params["grid_levels"]
+        p = self.params
+        symbol = p["symbol"]
+        levels = int(p.get("grid_levels", 10) or 10)
+        lot = float(p.get("lot_size", p.get("base_lot", 0.01)) or 0.01)
+
+        current_price = await self.broker.get_price(symbol)
+
+        # Derive grid spacing from whatever the params provide:
+        # explicit spacing, an upper/lower band, an ATR-based range, or a
+        # sensible 0.1%-of-price fallback. Keeps GRID working with both manual
+        # params and AI-generated presets.
+        if p.get("grid_spacing"):
+            self.grid_spacing = float(p["grid_spacing"])
+        elif p.get("upper_price") and p.get("lower_price"):
+            self.grid_spacing = (float(p["upper_price"]) - float(p["lower_price"])) / max(levels, 1)
+        elif p.get("grid_range"):
+            self.grid_spacing = float(p["grid_range"]) / max(levels, 1)
+        else:
+            self.grid_spacing = current_price * 0.001
+
         self.pending_orders: dict[str, dict] = {}
 
-        # Place initial grid of limit orders around the current price.
-        current_price = await self.broker.get_price(self.params["symbol"])
-        for i in range(self.params["grid_levels"]):
+        # Place a symmetric ladder: buys below, sells above the current price.
+        half = max(levels // 2, 1)
+        for i in range(1, half + 1):
             buy_price = current_price - (i * self.grid_spacing)
             sell_price = current_price + (i * self.grid_spacing)
 
             buy_order = await self.broker.place_limit_order(
-                symbol=self.params["symbol"],
-                side="BUY",
-                price=buy_price,
-                volume=self.params["lot_size"],
+                symbol=symbol, side="BUY", price=buy_price, volume=lot
             )
             sell_order = await self.broker.place_limit_order(
-                symbol=self.params["symbol"],
-                side="SELL",
-                price=sell_price,
-                volume=self.params["lot_size"],
+                symbol=symbol, side="SELL", price=sell_price, volume=lot
             )
             self.pending_orders[buy_order.id] = {
                 "type": "BUY",
