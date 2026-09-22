@@ -10,6 +10,7 @@ import {
   API_URL,
   brokerApiConfigured,
   linkBroker,
+  linkMt5Bridge,
   pingAuthedPost,
   pingBackend,
   pingDB,
@@ -30,6 +31,7 @@ function Account() {
   const [accounts, setAccounts] = useState<BrokerAccountRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showLink, setShowLink] = useState(false);
+  const [showBridge, setShowBridge] = useState(false);
   const [paperBusy, setPaperBusy] = useState(false);
   const admin = isAdmin(user);
 
@@ -185,6 +187,12 @@ function Account() {
             >
               {showLink ? "CLOSE" : "+ LINK"}
             </button>
+            <button
+              onClick={() => setShowBridge((v) => !v)}
+              className="rounded border border-amber/40 bg-amber/10 px-2 py-1 font-mono text-[10px] font-semibold text-amber"
+            >
+              {showBridge ? "CLOSE" : "+ BRIDGE"}
+            </button>
           </div>
         </div>
 
@@ -192,6 +200,15 @@ function Account() {
           <LinkBrokerForm
             onDone={() => {
               setShowLink(false);
+              loadAccounts();
+            }}
+          />
+        )}
+
+        {showBridge && (
+          <BridgeLinkForm
+            onDone={() => {
+              setShowBridge(false);
               loadAccounts();
             }}
           />
@@ -219,6 +236,11 @@ function Account() {
                     <span className="rounded border border-line bg-panel2 px-1.5 py-0.5 font-mono text-[10px] text-amber">
                       {a.account_type.toUpperCase()}
                     </span>
+                    {a.connection_provider === "self_hosted" && (
+                      <span className="rounded border border-line bg-panel2 px-1.5 py-0.5 font-mono text-[10px] text-muted">
+                        MT5 BRIDGE
+                      </span>
+                    )}
                   </div>
                   <span className="font-mono text-xs text-fg">
                     {a.balance != null ? `$${Number(a.balance).toLocaleString()}` : "—"}
@@ -381,6 +403,95 @@ function LinkBrokerForm({ onDone }: { onDone: () => void }) {
         className="h-9 w-full rounded-lg bg-amber font-mono text-[11px] font-semibold text-ink transition active:scale-[0.98] disabled:opacity-50"
       >
         {busy ? "Linking…" : "Link account"}
+      </button>
+    </form>
+  );
+}
+
+function BridgeLinkForm({ onDone }: { onDone: () => void }) {
+  const [broker, setBroker] = useState("exness");
+  const [bridgeUrl, setBridgeUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [accountType, setAccountType] = useState<"demo" | "live">("demo");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!brokerApiConfigured) {
+    return (
+      <div className="mb-2 rounded-lg border border-amber/30 bg-amber/10 p-3 font-mono text-[11px] text-amber">
+        Backend not connected yet. Set NEXT_PUBLIC_API_URL (your deployed Tilly API) in Cloudflare
+        Pages, then reload to link an MT5 bridge.
+      </div>
+    );
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await linkMt5Bridge({
+        broker_name: broker,
+        bridge_url: bridgeUrl.trim(),
+        bridge_api_key: apiKey.trim(),
+        account_type: accountType,
+      });
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Linking failed.");
+      setBusy(false);
+    }
+  }
+
+  const field =
+    "h-9 w-full rounded-lg border border-line bg-ink px-3 text-sm text-fg outline-none placeholder:text-muted/50 focus:border-amber/60";
+
+  return (
+    <form onSubmit={submit} className="mb-2 space-y-2 rounded-lg border border-line bg-panel p-3">
+      <p className="font-mono text-[10px] leading-relaxed text-muted">
+        Connect a real MT5 account through your own bridge service instead of MetaAPI. Run it next
+        to a real MT5 terminal on your own machine — see tilly-trading/mt5-bridge/README.md — then
+        paste its HTTPS URL and API key below. We verify it live before saving.
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <select value={broker} onChange={(e) => setBroker(e.target.value)} className={field}>
+          <option value="exness">Exness</option>
+          <option value="xm">XM</option>
+          <option value="vantage">Vantage</option>
+        </select>
+        <select
+          value={accountType}
+          onChange={(e) => setAccountType(e.target.value as "demo" | "live")}
+          className={field}
+        >
+          <option value="demo">Demo</option>
+          <option value="live">Live</option>
+        </select>
+      </div>
+      <input
+        className={field}
+        placeholder="https://your-bridge.trycloudflare.com"
+        value={bridgeUrl}
+        onChange={(e) => setBridgeUrl(e.target.value)}
+      />
+      <input
+        className={field}
+        type="password"
+        placeholder="Bridge API key"
+        value={apiKey}
+        onChange={(e) => setApiKey(e.target.value)}
+      />
+      {error && (
+        <p className="rounded-md border border-down/30 bg-down/10 px-3 py-2 font-mono text-[10px] text-down">
+          {error}
+        </p>
+      )}
+      <button
+        type="submit"
+        disabled={busy || !bridgeUrl || !apiKey}
+        className="h-9 w-full rounded-lg bg-amber font-mono text-[11px] font-semibold text-ink transition active:scale-[0.98] disabled:opacity-50"
+      >
+        {busy ? "Connecting…" : "Connect bridge"}
       </button>
     </form>
   );

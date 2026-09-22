@@ -12,11 +12,12 @@ import uuid
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from sqlalchemy import select
 
+from app.broker.mt5_bridge_client import MT5BridgeClient, MT5BridgeError
 from app.core.deps import DbSession
 from app.core.supabase_auth import SupabaseUserId
 from app.db.models.broker_account import BrokerAccount
 from app.db.session import async_session_factory
-from app.schemas.broker import BrokerAccountOut, BrokerLinkRequest
+from app.schemas.broker import BridgeLinkRequest, BrokerAccountOut, BrokerLinkRequest
 from app.services.broker_service import provision_account
 
 router = APIRouter()
@@ -131,6 +132,55 @@ async def link_account(
         payload.server,
         payload.platform.value,
     )
+    return account
+
+
+@router.post("/mt5-bridge", response_model=BrokerAccountOut, status_code=status.HTTP_201_CREATED)
+async def link_mt5_bridge(
+    payload: BridgeLinkRequest, user_id: SupabaseUserId, db: DbSession
+) -> BrokerAccount:
+    """Link a self-hosted MT5 bridge (see tilly-trading/mt5-bridge/).
+
+    Unlike MetaAPI provisioning this is a single fast HTTP round trip to a
+    service the user already has running, so we verify it synchronously
+    instead of a background task + polling.
+    """
+    client = MT5BridgeClient(base_url=payload.bridge_url, api_key=payload.bridge_api_key)
+    try:
+        await client.connect()
+        info = await client.get_account_information()
+    except MT5BridgeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - unreachable bridge, bad URL, etc.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not reach the MT5 bridge at {payload.bridge_url}: {exc}",
+        ) from exc
+    finally:
+        await client.close()
+
+    account = BrokerAccount(
+        user_id=user_id,
+        broker_name=payload.broker_name.lower(),
+        account_id=payload.bridge_url,
+        account_type=payload.account_type.value,
+        connection_provider="self_hosted",
+        bridge_url=payload.bridge_url,
+        bridge_api_key=payload.bridge_api_key,
+        balance=info.get("balance"),
+        currency=info.get("currency", "USD"),
+        status="connected",
+        is_active=True,
+    )
+    try:
+        db.add(account)
+        await db.commit()
+        await db.refresh(account)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {type(exc).__name__}: {exc}",
+        ) from exc
     return account
 
 

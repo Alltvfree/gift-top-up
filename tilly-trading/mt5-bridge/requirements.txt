@@ -1,0 +1,4 @@
+# Windows only — MetaTrader5 talks to the terminal via local IPC, no Linux/macOS build exists.
+MetaTrader5==5.0.5120
+fastapi==0.115.6
+uvicorn[standard]==0.32.1

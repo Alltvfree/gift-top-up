@@ -68,6 +68,7 @@ export interface BrokerAccountRow {
   server: string | null;
   platform: string | null;
   metaapi_account_id: string | null;
+  bridge_url: string | null;
   last_error: string | null;
   created_at: string;
 }

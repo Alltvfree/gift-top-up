@@ -58,6 +58,13 @@ export interface LinkBrokerInput {
   account_type: "demo" | "live";
 }
 
+export interface LinkMt5BridgeInput {
+  broker_name: string;
+  bridge_url: string;
+  bridge_api_key: string;
+  account_type: "demo" | "live";
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
@@ -92,6 +99,32 @@ export async function linkBroker(input: LinkBrokerInput): Promise<void> {
     throw new Error("Backend not configured (NEXT_PUBLIC_API_URL is not set).");
   }
   const res = await fetch(`${API_URL}/api/v1/broker/link`, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      detail = (await res.json()).detail ?? detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+}
+
+/**
+ * Link a self-hosted MT5 bridge (tilly-trading/mt5-bridge/) — a small HTTPS
+ * service the user runs themselves next to a real MT5 terminal, instead of
+ * provisioning through MetaAPI. The backend verifies it live (a health check
+ * + account fetch) before saving, so a bad URL/key fails immediately.
+ */
+export async function linkMt5Bridge(input: LinkMt5BridgeInput): Promise<void> {
+  if (!brokerApiConfigured) {
+    throw new Error("Backend not configured (NEXT_PUBLIC_API_URL is not set).");
+  }
+  const res = await fetch(`${API_URL}/api/v1/broker/mt5-bridge`, {
     method: "POST",
     headers: await authHeaders(),
     body: JSON.stringify(input),

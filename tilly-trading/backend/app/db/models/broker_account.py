@@ -30,4 +30,11 @@ class BrokerAccount(UUIDMixin, TimestampMixin, Base):
     platform: Mapped[str] = mapped_column(String(10), default="mt5", nullable=False)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # ----- self-hosted MT5 bridge (connection_provider = 'self_hosted') -----
+    # A small HTTP service the user runs next to a real MT5 terminal; see
+    # tilly-trading/mt5-bridge/. bridge_api_key is a bearer token, never
+    # returned by the backend API (see schemas/broker.py::BrokerAccountOut).
+    bridge_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    bridge_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     bots = relationship("Bot", back_populates="broker_account")
