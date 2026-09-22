@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { ConsoleShell, SectionTitle } from "@/components/console-shell";
 import { PriceChart } from "@/components/price-chart";
-import { fetchPositions } from "@/lib/db";
+import { TradeJournal } from "@/components/trade-journal";
+import { fetchClosedPositions, fetchPositions } from "@/lib/db";
 import type { PositionRow } from "@/lib/supabase";
 
 const DEFAULT_SYMBOLS = ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD"];
@@ -18,6 +19,7 @@ export default function TradesPage() {
 
 function Trades() {
   const [positions, setPositions] = useState<PositionRow[]>([]);
+  const [closedCount, setClosedCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [chartSymbol, setChartSymbol] = useState<string | null>(null);
 
@@ -31,9 +33,11 @@ function Trades() {
   useEffect(() => {
     let active = true;
     const refresh = (silent: boolean) => {
-      fetchPositions()
-        .then((p) => {
-          if (active) setPositions(p);
+      Promise.all([fetchPositions(), fetchClosedPositions()])
+        .then(([open, closed]) => {
+          if (!active) return;
+          setPositions(open);
+          setClosedCount(closed.length);
         })
         .finally(() => {
           if (active && !silent) setLoading(false);
@@ -60,7 +64,7 @@ function Trades() {
           value={`${openPnl >= 0 ? "+" : "−"}$${Math.abs(openPnl)}`}
           tone={openPnl >= 0 ? "text-up" : "text-down"}
         />
-        <Stat label="CLOSED" value="—" tone="text-muted" />
+        <Stat label="CLOSED" value={closedCount === null ? "—" : String(closedCount)} tone="text-muted" />
       </section>
 
       <section>
@@ -130,12 +134,8 @@ function Trades() {
       </section>
 
       <section>
-        <SectionTitle title="CLOSED TRADES" />
-        <div className="rounded-lg border border-dashed border-line bg-panel/50 p-5 text-center">
-          <p className="text-[11px] text-muted">
-            Trade history will populate as bots close positions.
-          </p>
-        </div>
+        <SectionTitle title="TRADE JOURNAL" meta="EDGE SCORE" />
+        <TradeJournal />
       </section>
     </>
   );

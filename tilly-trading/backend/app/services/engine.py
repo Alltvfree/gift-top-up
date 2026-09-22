@@ -22,7 +22,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
 from app.bots.base import BaseBot
 from app.broker.base import BrokerClient
@@ -163,35 +163,63 @@ class TradingEngine:
         await self._sync_positions(running, bot, session)
 
     async def _sync_positions(self, running: RunningBot, bot: Bot, session) -> None:
-        """Reflect broker positions for this bot's symbol into the DB + PnL."""
+        """Reflect broker positions for this bot's symbol into the DB + PnL.
+
+        Diffs the broker's snapshot against this bot's open DB rows instead of
+        replacing them wholesale: a row still reported stays open and gets its
+        live price/PnL updated in place (stable id across ticks); a row that
+        dropped out of the snapshot has closed, and is marked `closed_at` with
+        its last-known unrealized PnL as `realized_pnl` — rather than deleted —
+        so it becomes trade history for the journal (Trades page). The broker
+        interface doesn't hand back an exact close fill price, so that
+        realized figure is a same-tick approximation, not a booked exit price.
+        """
         try:
             broker_positions = await running.broker.get_positions()
         except Exception:  # noqa: BLE001
             return
         mine = [p for p in broker_positions if p.get("symbol") == running.symbol]
+        live_ids = {str(p.get("id", "")) for p in mine}
 
-        # Replace this bot's open positions with the current broker snapshot.
-        await session.execute(
-            delete(Position).where(Position.bot_id == bot.id, Position.closed_at.is_(None))
-        )
-        total_pnl = 0.0
-        for p in mine:
-            upnl = float(p.get("unrealizedProfit", p.get("profit", 0)) or 0)
-            total_pnl += upnl
-            session.add(
-                Position(
-                    bot_id=bot.id,
-                    broker_position_id=str(p.get("id", "")),
-                    symbol=running.symbol,
-                    side=str(p.get("type", "")).replace("POSITION_TYPE_", ""),
-                    volume=float(p.get("volume", 0) or 0),
-                    open_price=float(p.get("openPrice", 0) or 0),
-                    current_price=float(p.get("currentPrice", 0) or 0) or None,
-                    unrealized_pnl=upnl,
-                )
+        existing = (
+            await session.scalars(
+                select(Position).where(Position.bot_id == bot.id, Position.closed_at.is_(None))
             )
-        bot.total_pnl = total_pnl
-        bot.stopped_at = None if bot.status == "running" else datetime.now(timezone.utc)
+        ).all()
+        existing_by_broker_id = {p.broker_position_id: p for p in existing if p.broker_position_id}
+
+        now = datetime.now(timezone.utc)
+        for row in existing:
+            if row.broker_position_id not in live_ids:
+                row.closed_at = now
+                row.realized_pnl = row.unrealized_pnl
+
+        total_unrealized = 0.0
+        for p in mine:
+            broker_id = str(p.get("id", ""))
+            upnl = float(p.get("unrealizedProfit", p.get("profit", 0)) or 0)
+            total_unrealized += upnl
+            current_price = float(p.get("currentPrice", 0) or 0) or None
+            row = existing_by_broker_id.get(broker_id)
+            if row is not None:
+                row.current_price = current_price
+                row.unrealized_pnl = upnl
+            else:
+                session.add(
+                    Position(
+                        bot_id=bot.id,
+                        broker_position_id=broker_id,
+                        symbol=running.symbol,
+                        side=str(p.get("type", "")).replace("POSITION_TYPE_", ""),
+                        volume=float(p.get("volume", 0) or 0),
+                        open_price=float(p.get("openPrice", 0) or 0),
+                        current_price=current_price,
+                        unrealized_pnl=upnl,
+                    )
+                )
+
+        bot.total_pnl = total_unrealized
+        bot.stopped_at = None if bot.status == "running" else now
         await session.commit()
 
 

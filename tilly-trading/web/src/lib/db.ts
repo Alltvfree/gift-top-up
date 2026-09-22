@@ -61,6 +61,17 @@ export async function fetchPositions(): Promise<PositionRow[]> {
   return (data ?? []) as PositionRow[];
 }
 
+export async function fetchClosedPositions(limit = 200): Promise<PositionRow[]> {
+  const { data, error } = await supabase
+    .from("positions")
+    .select("*")
+    .not("closed_at", "is", null)
+    .order("closed_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as PositionRow[];
+}
+
 export async function fetchBrokerAccounts(): Promise<BrokerAccountRow[]> {
   const { data, error } = await supabase
     .from("broker_accounts")
