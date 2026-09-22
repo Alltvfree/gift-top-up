@@ -124,17 +124,22 @@ function NewBot() {
 
         <label className="block">
           <span className="mb-1 block font-mono text-[10px] tracking-widest text-muted">SYMBOL</span>
-          <select
+          <input
+            list="symbol-options"
             value={symbol}
-            onChange={(e) => setSymbol(e.target.value)}
-            className="h-10 w-full rounded-lg border border-line bg-ink px-3 text-sm text-fg outline-none focus:border-amber/60"
-          >
+            onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+            placeholder="XAUUSD"
+            className="h-10 w-full rounded-lg border border-line bg-ink px-3 text-sm text-fg outline-none placeholder:text-muted/50 focus:border-amber/60"
+          />
+          <datalist id="symbol-options">
             {SYMBOLS.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
+              <option key={s} value={s} />
             ))}
-          </select>
+          </datalist>
+          <p className="mt-1 font-mono text-[9px] text-muted">
+            Pick a common symbol or type your broker&apos;s exact name (e.g. XAUUSDm) — real
+            brokers often suffix theirs differently.
+          </p>
         </label>
 
         <label className="block">
