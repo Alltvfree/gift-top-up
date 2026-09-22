@@ -18,6 +18,7 @@ implementation):
     GET  /positions                                -> [{"id","symbol","type",
                                                           "volume","openPrice",
                                                           "currentPrice","unrealizedProfit"}]
+    GET  /candles/{symbol}?timeframe=&limit=       -> {"bars": [{"time","open","high","low","close"}]}
     POST /orders/market   {"symbol","side","volume"}        -> {"id","filled_price","status"}
     POST /orders/limit    {"symbol","side","price","volume"} -> {"id","status"}
     POST /positions/{id}/close                     -> {"ok": bool}
@@ -128,6 +129,12 @@ class MT5BridgeClient(BrokerClient):
         if result.status_code >= 400:
             raise MT5BridgeError(f"MT5 bridge GET /positions -> {result.status_code}: {result.text[:300]}")
         return result.json()
+
+    async def get_candles(self, symbol: str, timeframe: str, limit: int) -> list[dict]:
+        result = await self._request(
+            "GET", f"/candles/{symbol}", params={"timeframe": timeframe, "limit": limit}
+        )
+        return result.get("bars", [])
 
     async def get_orders(self) -> list[dict[str, Any]]:
         result = await self._http().get("/orders")

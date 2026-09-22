@@ -64,3 +64,11 @@ class BrokerClient(ABC):
     @abstractmethod
     async def close_position(self, position_id: str) -> None:
         """Close an open position by id."""
+
+    async def get_candles(self, symbol: str, timeframe: str, limit: int) -> list[dict]:
+        """Historical OHLC bars, for adapters with a real history API (e.g.
+        the MT5 bridge via MetaTrader5.copy_rates_from_pos). Not abstract —
+        most adapters (paper, and MetaAPI's RPC connection) have no candle
+        history to offer; callers should catch NotImplementedError and fall
+        back to another price source rather than treat it as a hard error."""
+        raise NotImplementedError(f"{type(self).__name__} does not support get_candles().")

@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from sqlalchemy import select
 
 from app.broker.mt5_bridge_client import MT5BridgeClient, MT5BridgeError
+from app.broker.registry import build_broker_for_account
 from app.core.deps import DbSession
 from app.core.supabase_auth import SupabaseUserId
 from app.db.models.broker_account import BrokerAccount
@@ -182,6 +183,50 @@ async def link_mt5_bridge(
             detail=f"Database error: {type(exc).__name__}: {exc}",
         ) from exc
     return account
+
+
+@router.get("/accounts/{account_id}/candles")
+async def account_candles(
+    account_id: uuid.UUID,
+    user_id: SupabaseUserId,
+    db: DbSession,
+    symbol: str,
+    timeframe: str = "1m",
+    limit: int = 200,
+) -> dict:
+    """Real OHLC history from this account's own connection, for the price
+    chart — currently only the MT5 bridge implements get_candles(); other
+    providers raise NotImplementedError, surfaced here as 501 so the
+    frontend can fall back to a public feed or the simulated chart rather
+    than treat it as a hard failure."""
+    account = await db.get(BrokerAccount, account_id)
+    if account is None or account.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
+
+    try:
+        broker = build_broker_for_account(account)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    try:
+        await broker.connect()
+        bars = await broker.get_candles(symbol, timeframe, min(max(limit, 1), 1000))
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - bridge unreachable, symbol unknown, etc.
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    finally:
+        try:
+            await broker.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    return {
+        "symbol": symbol.upper(),
+        "timeframe": timeframe,
+        "source": account.connection_provider,
+        "bars": bars,
+    }
 
 
 @router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)

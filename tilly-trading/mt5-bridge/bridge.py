@@ -107,6 +107,14 @@ def _position_type(mt5_type: int) -> str:
     return "POSITION_TYPE_BUY" if mt5_type == mt5.POSITION_TYPE_BUY else "POSITION_TYPE_SELL"
 
 
+TIMEFRAME_MAP = {
+    "1m": mt5.TIMEFRAME_M1,
+    "5m": mt5.TIMEFRAME_M5,
+    "15m": mt5.TIMEFRAME_M15,
+    "1h": mt5.TIMEFRAME_H1,
+}
+
+
 # ---------------------------------------------------------------- schemas --
 class MarketOrderIn(BaseModel):
     symbol: str
@@ -163,6 +171,31 @@ def positions() -> list[dict]:
         }
         for p in rows
     ]
+
+
+@app.get("/candles/{symbol}", dependencies=[Depends(require_api_key)])
+def candles(symbol: str, timeframe: str = "1m", limit: int = 200) -> dict:
+    """Real historical OHLC bars from the terminal — mt5.copy_rates_from_pos,
+    the official history API. Returns oldest-first, matching the shape the
+    Tilly backend/frontend already use for every other candle source."""
+    _ensure_symbol(symbol)
+    mt5_timeframe = TIMEFRAME_MAP.get(timeframe, mt5.TIMEFRAME_M1)
+    limit = max(1, min(limit, 1000))
+    rates = mt5.copy_rates_from_pos(symbol, mt5_timeframe, 0, limit)
+    if rates is None or len(rates) == 0:
+        code, desc = mt5.last_error()
+        raise HTTPException(status_code=502, detail=f"No rate history for {symbol}: [{code}] {desc}")
+    bars = [
+        {
+            "time": int(r["time"]) * 1000,  # MT5 gives unix seconds; we use ms everywhere else
+            "open": float(r["open"]),
+            "high": float(r["high"]),
+            "low": float(r["low"]),
+            "close": float(r["close"]),
+        }
+        for r in rates
+    ]
+    return {"symbol": symbol, "timeframe": timeframe, "bars": bars}
 
 
 @app.get("/orders", dependencies=[Depends(require_api_key)])

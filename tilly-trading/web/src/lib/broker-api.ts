@@ -5,6 +5,7 @@
  * browser — it calls the deployed FastAPI backend, authenticated with the
  * user's Supabase access token. Set NEXT_PUBLIC_API_URL to the backend URL.
  */
+import type { Candle } from "@/lib/candles";
 import { supabase } from "@/lib/supabase";
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
@@ -112,6 +113,29 @@ export async function linkBroker(input: LinkBrokerInput): Promise<void> {
     }
     throw new Error(detail);
   }
+}
+
+/**
+ * Real OHLC history from a linked broker account's own connection (the MT5
+ * bridge, currently the only provider that implements it). Throws on any
+ * failure — including a 501 from a provider that doesn't support candles —
+ * callers should catch this and fall back to a public feed / the simulated
+ * chart rather than surface it as an error.
+ */
+export async function fetchAccountCandles(
+  accountId: string,
+  symbol: string,
+  timeframe: string,
+  limit = 200,
+): Promise<Candle[]> {
+  if (!brokerApiConfigured) throw new Error("Backend not configured.");
+  const qs = new URLSearchParams({ symbol, timeframe, limit: String(limit) });
+  const res = await fetch(`${API_URL}/api/v1/broker/accounts/${accountId}/candles?${qs}`, {
+    headers: await authHeaders(),
+  });
+  if (!res.ok) throw new Error(`candles ${res.status}`);
+  const body: { bars?: Candle[] } = await res.json();
+  return body.bars ?? [];
 }
 
 /**

@@ -106,6 +106,7 @@ sleeping bridge means bots silently stop trading.
 | GET | `/account` | — | `{balance, equity, currency}` |
 | GET | `/price/{symbol}` | — | `{bid, ask}` |
 | GET | `/positions` | — | `[{id, symbol, type, volume, openPrice, currentPrice, unrealizedProfit}]` |
+| GET | `/candles/{symbol}?timeframe=&limit=` | — | `{symbol, timeframe, bars: [{time, open, high, low, close}]}` — real history via `copy_rates_from_pos` |
 | GET | `/orders` | — | `[{id, symbol, type, openPrice, volume}]` |
 | POST | `/orders/market` | `{symbol, side, volume}` | `{id, filled_price, status}` |
 | POST | `/orders/limit` | `{symbol, side, price, volume}` | `{id, status}` |

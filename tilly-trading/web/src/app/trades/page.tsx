@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ConsoleShell, SectionTitle } from "@/components/console-shell";
 import { PriceChart } from "@/components/price-chart";
 import { TradeJournal } from "@/components/trade-journal";
-import { fetchClosedPositions, fetchPositions } from "@/lib/db";
+import { fetchBrokerAccounts, fetchClosedPositions, fetchPositions } from "@/lib/db";
 import type { PositionRow } from "@/lib/supabase";
 
 const DEFAULT_SYMBOLS = ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD"];
@@ -22,6 +22,7 @@ function Trades() {
   const [closedCount, setClosedCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [chartSymbol, setChartSymbol] = useState<string | null>(null);
+  const [liveAccountId, setLiveAccountId] = useState<string | null>(null);
 
   const chartSymbols = useMemo(() => {
     const fromPositions = Array.from(new Set(positions.map((p) => p.symbol)));
@@ -45,6 +46,22 @@ function Trades() {
     };
     refresh(false);
     const t = setInterval(() => refresh(true), 5000);
+
+    // A connected self-hosted MT5 bridge account, if any, feeds the price
+    // chart real history (see web/src/lib/live-prices.ts). One-off fetch —
+    // doesn't need the 5s position poll's cadence.
+    fetchBrokerAccounts()
+      .then((accounts) => {
+        if (!active) return;
+        const live = accounts.find(
+          (a) => a.connection_provider === "self_hosted" && a.status === "connected",
+        );
+        setLiveAccountId(live?.id ?? null);
+      })
+      .catch(() => {
+        /* no live account available — chart falls back to a public feed */
+      });
+
     return () => {
       active = false;
       clearInterval(t);
@@ -82,7 +99,7 @@ function Trades() {
             ))}
           </select>
         </div>
-        <PriceChart symbol={activeSymbol} />
+        <PriceChart symbol={activeSymbol} liveAccountId={liveAccountId} />
       </section>
 
       <section>

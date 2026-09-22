@@ -2,21 +2,24 @@
 
 /**
  * Candlestick price chart — drawn ourselves with inline SVG, no chart
- * library. Replaces an earlier @luxalgo/vela integration that rendered
- * blank on a custom domain (its data provider fetched our backend's
- * /api/v1/market/candles over CORS, which wasn't allow-listed for that
- * origin). This version generates the same deterministic synthetic bars
- * (web/src/lib/candles.ts) entirely client-side — no network call, so nothing
- * here can be blocked by CORS or a slow/unreachable backend.
+ * library (an earlier @luxalgo/vela integration rendered blank on a custom
+ * domain: its provider fetched our backend over CORS, which wasn't
+ * allow-listed for that origin). Real data where it's available, always
+ * labeled honestly (see web/src/lib/live-prices.ts for the priority order):
+ * the user's own MT5 bridge, then Binance (crypto), then Twelve Data
+ * (forex/gold, if configured) — falling back to the deterministic simulated
+ * generator (web/src/lib/candles.ts, no network call) only when none of
+ * those have data.
  */
 import { useEffect, useMemo, useState } from "react";
-import { generateCandles, liveQuote, type Candle } from "@/lib/candles";
+import type { Candle } from "@/lib/candles";
+import { fetchBestCandles, SOURCE_LABEL, type PriceSource } from "@/lib/live-prices";
 
 const TIMEFRAMES = ["1m", "5m", "15m", "1h"] as const;
 type Timeframe = (typeof TIMEFRAMES)[number];
 
 const BAR_COUNT = 60;
-const REFRESH_MS = 5000;
+const REFRESH_MS = 15000; // real feeds have rate limits; no need to poll faster than this
 
 const UP = "#34d399";
 const DOWN = "#fb5d5d";
@@ -30,16 +33,32 @@ const H = 220;
 const RIGHT_MARGIN = 54; // room for price labels
 const BOTTOM_MARGIN = 18; // room for time labels
 
-export function PriceChart({ symbol }: { symbol: string }) {
+/**
+ * @param liveAccountId A connected self-hosted (MT5 bridge) broker account
+ *   id, if the user has one — pass null/undefined to skip straight to the
+ *   public feeds.
+ */
+export function PriceChart({ symbol, liveAccountId }: { symbol: string; liveAccountId?: string | null }) {
   const [timeframe, setTimeframe] = useState<Timeframe>("1m");
   const [bars, setBars] = useState<Candle[]>([]);
+  const [source, setSource] = useState<PriceSource | null>(null);
 
   useEffect(() => {
-    const tick = () => setBars(generateCandles(symbol, timeframe, BAR_COUNT, liveQuote(symbol)));
+    let active = true;
+    const tick = () => {
+      fetchBestCandles(symbol, timeframe, BAR_COUNT, liveAccountId ?? null).then((result) => {
+        if (!active) return;
+        setBars(result.bars);
+        setSource(result.source);
+      });
+    };
     tick();
     const t = setInterval(tick, REFRESH_MS);
-    return () => clearInterval(t);
-  }, [symbol, timeframe]);
+    return () => {
+      active = false;
+      clearInterval(t);
+    };
+  }, [symbol, timeframe, liveAccountId]);
 
   const geometry = useMemo(() => computeGeometry(bars), [bars]);
   const lastClose = bars.length > 0 ? bars[bars.length - 1].close : null;
@@ -50,8 +69,12 @@ export function PriceChart({ symbol }: { symbol: string }) {
     <div className="rounded-lg border border-line bg-panel p-2">
       <div className="mb-2 flex items-center justify-between px-1">
         <div className="flex items-baseline gap-2">
-          <span className="font-mono text-[10px] tracking-widest text-muted">
-            {symbol} · SIMULATED
+          <span
+            className={`font-mono text-[10px] tracking-widest ${
+              source && source !== "simulated" ? "text-up" : "text-muted"
+            }`}
+          >
+            {symbol} · {source ? SOURCE_LABEL[source] : "…"}
           </span>
           {lastClose !== null && (
             <span className={`font-mono text-[11px] font-semibold ${changeUp ? "text-up" : "text-down"}`}>
