@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ConsoleShell, SectionTitle } from "@/components/console-shell";
+import { PriceChart } from "@/components/price-chart";
 import { fetchPositions } from "@/lib/db";
 import type { PositionRow } from "@/lib/supabase";
+
+const DEFAULT_SYMBOLS = ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD"];
 
 export default function TradesPage() {
   return (
@@ -16,6 +19,14 @@ export default function TradesPage() {
 function Trades() {
   const [positions, setPositions] = useState<PositionRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [chartSymbol, setChartSymbol] = useState<string | null>(null);
+
+  const chartSymbols = useMemo(() => {
+    const fromPositions = Array.from(new Set(positions.map((p) => p.symbol)));
+    const merged = [...fromPositions, ...DEFAULT_SYMBOLS.filter((s) => !fromPositions.includes(s))];
+    return merged;
+  }, [positions]);
+  const activeSymbol = chartSymbol ?? chartSymbols[0] ?? DEFAULT_SYMBOLS[0];
 
   useEffect(() => {
     let active = true;
@@ -50,6 +61,24 @@ function Trades() {
           tone={openPnl >= 0 ? "text-up" : "text-down"}
         />
         <Stat label="CLOSED" value="—" tone="text-muted" />
+      </section>
+
+      <section>
+        <div className="mb-2 flex items-center justify-between">
+          <SectionTitle title="PRICE CHART" />
+          <select
+            value={activeSymbol}
+            onChange={(e) => setChartSymbol(e.target.value)}
+            className="rounded border border-line bg-panel px-2 py-1 font-mono text-[10px] text-fg"
+          >
+            {chartSymbols.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </div>
+        <PriceChart symbol={activeSymbol} />
       </section>
 
       <section>

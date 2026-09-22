@@ -27,6 +27,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+*.tsbuildinfo
 
 # Editors / OS
 # NOTE: .vscode/ is intentionally tracked — it ships the run/debug configs.
