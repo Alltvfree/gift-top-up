@@ -1,13 +1,20 @@
 /**
  * Binance's public market-data REST API — free, keyless, and explicitly
  * designed for direct browser calls (it's what Binance's own web UI uses).
- * Covers crypto only; there is no XAUUSD/EURUSD/GBPUSD/USDJPY on Binance —
- * see twelvedata.ts for those.
+ * Binance is a crypto exchange, not a forex broker — there is no real
+ * EURUSD/GBPUSD/USDJPY here, and pointing those symbols at some Binance
+ * pair would mean showing the wrong instrument as if it were real, which
+ * we don't do. See twelvedata.ts for those three.
+ *
+ * XAUUSD is the one exception: PAXG (PAX Gold) is a token backed 1:1 by
+ * physical gold, redeemable for the metal — its USDT price is a genuine,
+ * closely-tracking proxy for spot gold, not a guess.
  */
 import type { Candle } from "@/lib/candles";
 
 const SYMBOL_MAP: Record<string, string> = {
   BTCUSD: "BTCUSDT",
+  XAUUSD: "PAXGUSDT",
 };
 
 export function binanceSymbolFor(symbol: string): string | null {

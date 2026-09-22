@@ -4,8 +4,11 @@
  * as if it were real.
  *
  *   1. The user's own MT5 bridge (real broker history), if one is linked.
- *   2. Binance's public API, for symbols it covers (crypto only).
- *   3. Twelve Data, for forex/gold, if the user has configured an API key.
+ *   2. Binance's public API — crypto directly, plus XAUUSD via the PAXG
+ *      gold-backed token (see binance.ts).
+ *   3. Twelve Data, for the forex majors (EURUSD/GBPUSD/USDJPY) — defaults
+ *      to Twelve Data's public `demo` key so this works with no signup;
+ *      NEXT_PUBLIC_TWELVEDATA_API_KEY overrides it with the user's own.
  *   4. The deterministic simulated generator — always available, never fails.
  */
 import { generateCandles, liveQuote, type Candle } from "@/lib/candles";

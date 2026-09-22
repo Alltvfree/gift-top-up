@@ -1,17 +1,23 @@
 /**
- * Twelve Data's REST API for forex + gold (XAUUSD, EURUSD, GBPUSD, USDJPY —
- * none of which Binance carries). Free tier requires your own API key
- * (twelvedata.com/pricing — the free plan covers this at a light poll rate);
- * set NEXT_PUBLIC_TWELVEDATA_API_KEY in Cloudflare Pages' build env. Skipped
- * entirely with no key configured — callers fall back further, never break.
+ * Twelve Data's REST API for forex (EURUSD, GBPUSD, USDJPY — Binance has no
+ * real forex data at all; XAUUSD is covered live via Binance's PAXG token
+ * instead, see binance.ts, but kept here too as a second opinion if that
+ * ever fails). "Fastest live platform, no signup" means we default to
+ * Twelve Data's public `demo` key rather than wait on the user to register
+ * for their own — it's real but shared and rate-limited (documented on
+ * Twelve Data's own site as a live testing key, not a production one). Set
+ * NEXT_PUBLIC_TWELVEDATA_API_KEY in Cloudflare Pages' build env to a real
+ * free-tier key (twelvedata.com/pricing) for reliable, non-shared use.
  *
  * ⚠️ Unverified from this repo's dev environment: outbound network access
  * here is restricted to a small allowlist that doesn't include
  * api.twelvedata.com, so this was written against Twelve Data's documented
- * contract (stable/widely used) but never actually called. Test it once a
- * key is configured — if the shape has drifted, fetchTwelveDataCandles
- * returns null (see the shape guard below) and the chart falls back to the
- * simulated series rather than showing garbage.
+ * contract (stable/widely used) but never actually called — including
+ * whether the `demo` key still works or has since been restricted/removed.
+ * Test it and check the chart's source label; if the demo key doesn't
+ * work, fetchTwelveDataCandles's shape guard makes it fall back to the
+ * simulated series rather than show garbage, and getting your own free key
+ * is the fix.
  */
 import type { Candle } from "@/lib/candles";
 
@@ -21,6 +27,8 @@ const SYMBOL_MAP: Record<string, string> = {
   GBPUSD: "GBP/USD",
   USDJPY: "USD/JPY",
 };
+
+const DEMO_API_KEY = "demo";
 
 const INTERVAL_MAP: Record<string, string> = {
   "1m": "1min",
@@ -46,8 +54,7 @@ export async function fetchTwelveDataCandles(
   timeframe: string,
   limit = 200,
 ): Promise<Candle[] | null> {
-  const apiKey = process.env.NEXT_PUBLIC_TWELVEDATA_API_KEY;
-  if (!apiKey) return null;
+  const apiKey = process.env.NEXT_PUBLIC_TWELVEDATA_API_KEY || DEMO_API_KEY;
   const tdSymbol = twelveDataSymbolFor(symbol);
   if (!tdSymbol) return null;
   const interval = INTERVAL_MAP[timeframe] ?? "1min";
