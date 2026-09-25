@@ -156,6 +156,15 @@ def price(symbol: str) -> dict:
     return {"bid": tick.bid, "ask": tick.ask}
 
 
+@app.get("/symbols", dependencies=[Depends(require_api_key)])
+def symbols() -> list[str]:
+    """Every symbol this account's terminal knows about, by its exact broker
+    name — lets the frontend offer a real picker instead of the user
+    guessing whether their broker suffixes symbols (XAUUSD vs XAUUSDm)."""
+    rows = mt5.symbols_get() or ()
+    return sorted(s.name for s in rows)
+
+
 @app.get("/positions", dependencies=[Depends(require_api_key)])
 def positions() -> list[dict]:
     rows = mt5.positions_get() or ()

@@ -139,6 +139,22 @@ export async function fetchAccountCandles(
 }
 
 /**
+ * This account's real broker-side symbol names (MT5 bridge only — other
+ * providers 501, callers should fall back to a fixed list). Powers the New
+ * Bot wizard's symbol picker so the user doesn't have to guess whether
+ * their broker suffixes symbols (XAUUSD vs XAUUSDm).
+ */
+export async function fetchAccountSymbols(accountId: string): Promise<string[]> {
+  if (!brokerApiConfigured) throw new Error("Backend not configured.");
+  const res = await fetch(`${API_URL}/api/v1/broker/accounts/${accountId}/symbols`, {
+    headers: await authHeaders(),
+  });
+  if (!res.ok) throw new Error(`symbols ${res.status}`);
+  const body: { symbols?: string[] } = await res.json();
+  return body.symbols ?? [];
+}
+
+/**
  * Link a self-hosted MT5 bridge (tilly-trading/mt5-bridge/) — a small HTTPS
  * service the user runs themselves next to a real MT5 terminal, instead of
  * provisioning through MetaAPI. The backend verifies it live (a health check

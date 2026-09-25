@@ -72,3 +72,11 @@ class BrokerClient(ABC):
         history to offer; callers should catch NotImplementedError and fall
         back to another price source rather than treat it as a hard error."""
         raise NotImplementedError(f"{type(self).__name__} does not support get_candles().")
+
+    async def get_symbols(self) -> list[str]:
+        """Every symbol this account's connection knows about, by its exact
+        broker-side name. Not abstract, same reasoning as get_candles() —
+        only adapters backed by a real broker connection (the MT5 bridge)
+        can answer this; callers fall back to a fixed symbol list on
+        NotImplementedError."""
+        raise NotImplementedError(f"{type(self).__name__} does not support get_symbols().")

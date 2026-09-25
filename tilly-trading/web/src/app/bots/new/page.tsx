@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ConsoleShell, SectionTitle } from "@/components/console-shell";
 import { createBot, fetchBrokerAccounts } from "@/lib/db";
+import { fetchAccountSymbols } from "@/lib/broker-api";
 import type { BrokerAccountRow } from "@/lib/supabase";
 import { generateParams, type PresetName, type Strategy } from "@/lib/presets";
 
@@ -32,6 +33,8 @@ function NewBot() {
   const [error, setError] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<BrokerAccountRow[]>([]);
   const [accountId, setAccountId] = useState<string>("");
+  const [accountSymbols, setAccountSymbols] = useState<string[] | null>(null);
+  const [symbolsLoading, setSymbolsLoading] = useState(false);
 
   useEffect(() => {
     fetchBrokerAccounts().then((a) => {
@@ -41,6 +44,31 @@ function NewBot() {
       if (connected) setAccountId(connected.id);
     });
   }, []);
+
+  // Real symbol list from the selected account's own connection, when it has
+  // one (currently the MT5 bridge) — replaces guessing at broker-specific
+  // suffixes. Falls back to the fixed default list on any failure/501.
+  useEffect(() => {
+    if (!accountId) {
+      setAccountSymbols(null);
+      return;
+    }
+    let active = true;
+    setSymbolsLoading(true);
+    fetchAccountSymbols(accountId)
+      .then((s) => {
+        if (active) setAccountSymbols(s.length > 0 ? s : null);
+      })
+      .catch(() => {
+        if (active) setAccountSymbols(null);
+      })
+      .finally(() => {
+        if (active) setSymbolsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [accountId]);
 
   function handleGenerate() {
     const b = parseFloat(balance);
@@ -124,21 +152,43 @@ function NewBot() {
 
         <label className="block">
           <span className="mb-1 block font-mono text-[10px] tracking-widest text-muted">SYMBOL</span>
-          <input
-            list="symbol-options"
-            value={symbol}
-            onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-            placeholder="XAUUSD"
-            className="h-10 w-full rounded-lg border border-line bg-ink px-3 text-sm text-fg outline-none placeholder:text-muted/50 focus:border-amber/60"
-          />
+          {accountSymbols ? (
+            // Real symbol list from the account's own connection (MT5 bridge) —
+            // pick from what your broker actually has, no guessing suffixes.
+            <select
+              value={accountSymbols.includes(symbol) ? symbol : ""}
+              onChange={(e) => setSymbol(e.target.value)}
+              className="h-10 w-full rounded-lg border border-line bg-ink px-3 text-sm text-fg outline-none focus:border-amber/60"
+            >
+              <option value="" disabled>
+                Select a symbol…
+              </option>
+              {accountSymbols.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              list="symbol-options"
+              value={symbol}
+              onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+              placeholder="XAUUSD"
+              className="h-10 w-full rounded-lg border border-line bg-ink px-3 text-sm text-fg outline-none placeholder:text-muted/50 focus:border-amber/60"
+            />
+          )}
           <datalist id="symbol-options">
             {SYMBOLS.map((s) => (
               <option key={s} value={s} />
             ))}
           </datalist>
           <p className="mt-1 font-mono text-[9px] text-muted">
-            Pick a common symbol or type your broker&apos;s exact name (e.g. XAUUSDm) — real
-            brokers often suffix theirs differently.
+            {symbolsLoading
+              ? "Loading this account's real symbol list…"
+              : accountSymbols
+                ? `${accountSymbols.length} symbols from your broker connection.`
+                : "Pick a common symbol or type your broker's exact name (e.g. XAUUSDm) — real brokers often suffix theirs differently."}
           </p>
         </label>
 

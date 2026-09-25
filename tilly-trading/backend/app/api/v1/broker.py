@@ -229,6 +229,38 @@ async def account_candles(
     }
 
 
+@router.get("/accounts/{account_id}/symbols")
+async def account_symbols(account_id: uuid.UUID, user_id: SupabaseUserId, db: DbSession) -> dict:
+    """This account's real broker-side symbol names, for the New Bot wizard
+    to offer a picker instead of the user guessing a broker's exact naming
+    (XAUUSD vs XAUUSDm etc.). Same NotImplementedError -> 501 pattern as
+    candles: providers without a real symbol list just aren't offered here,
+    the wizard falls back to its fixed default list."""
+    account = await db.get(BrokerAccount, account_id)
+    if account is None or account.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
+
+    try:
+        broker = build_broker_for_account(account)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    try:
+        await broker.connect()
+        symbols = await broker.get_symbols()
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - bridge unreachable, etc.
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    finally:
+        try:
+            await broker.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    return {"symbols": symbols}
+
+
 @router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def unlink_account(account_id: uuid.UUID, user_id: SupabaseUserId, db: DbSession):
     account = await db.get(BrokerAccount, account_id)
