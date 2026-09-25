@@ -62,7 +62,11 @@ class Settings(BaseSettings):
 
     # ----- Bot engine -----
     # Seconds between engine ticks (dispatch + on_tick) in the Celery beat loop.
-    engine_tick_seconds: int = 5
+    # float, not int: each tick makes a real HTTP round trip per running bot to
+    # whatever broker connection it uses (for the MT5 bridge: Render -> tunnel
+    # -> the user's PC -> MT5 IPC -> back), so going much below ~2s risks ticks
+    # queuing up faster than they complete rather than actually syncing faster.
+    engine_tick_seconds: float = 5.0
 
     # ----- AI presets (optional) -----
     openai_api_key: str = ""
