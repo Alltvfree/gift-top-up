@@ -173,7 +173,7 @@ function NewBot() {
             <input
               list="symbol-options"
               value={symbol}
-              onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+              onChange={(e) => setSymbol(e.target.value)}
               placeholder="XAUUSD"
               className="h-10 w-full rounded-lg border border-line bg-ink px-3 text-sm text-fg outline-none placeholder:text-muted/50 focus:border-amber/60"
             />
