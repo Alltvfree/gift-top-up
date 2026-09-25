@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ConsoleShell, SectionTitle } from "@/components/console-shell";
-import { fetchBots, fetchPositions, setBotStatus } from "@/lib/db";
+import { deleteBot, fetchBots, fetchPositions, setBotStatus } from "@/lib/db";
 import type { BotRow, PositionRow } from "@/lib/supabase";
 
 export default function Deck() {
@@ -19,6 +19,7 @@ function Dashboard() {
   const [positions, setPositions] = useState<PositionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -53,6 +54,21 @@ function Dashboard() {
       await load();
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function remove(bot: BotRow) {
+    if (!window.confirm(`Delete "${bot.name}"? This also deletes its position history and can't be undone.`)) {
+      return;
+    }
+    setDeletingId(bot.id);
+    try {
+      await deleteBot(bot.id);
+      await load();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to delete bot.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -126,17 +142,28 @@ function Dashboard() {
                 )}
                 <div className="mt-3 flex items-center justify-between">
                   <span className="font-mono text-[10px] uppercase text-muted">{b.status}</span>
-                  <button
-                    disabled={busyId === b.id}
-                    onClick={() => toggle(b)}
-                    className={`h-8 rounded-lg px-4 font-mono text-[11px] font-semibold transition active:scale-[0.98] disabled:opacity-50 ${
-                      b.status === "running"
-                        ? "border border-line bg-panel2 text-fg"
-                        : "bg-amber text-ink"
-                    }`}
-                  >
-                    {busyId === b.id ? "…" : b.status === "running" ? "STOP" : "START"}
-                  </button>
+                  <div className="flex gap-2">
+                    {b.status !== "running" && (
+                      <button
+                        disabled={deletingId === b.id}
+                        onClick={() => remove(b)}
+                        className="h-8 rounded-lg border border-down/30 bg-down/10 px-3 font-mono text-[11px] font-semibold text-down transition active:scale-[0.98] disabled:opacity-50"
+                      >
+                        {deletingId === b.id ? "…" : "DELETE"}
+                      </button>
+                    )}
+                    <button
+                      disabled={busyId === b.id}
+                      onClick={() => toggle(b)}
+                      className={`h-8 rounded-lg px-4 font-mono text-[11px] font-semibold transition active:scale-[0.98] disabled:opacity-50 ${
+                        b.status === "running"
+                          ? "border border-line bg-panel2 text-fg"
+                          : "bg-amber text-ink"
+                      }`}
+                    >
+                      {busyId === b.id ? "…" : b.status === "running" ? "STOP" : "START"}
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
