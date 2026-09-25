@@ -5,9 +5,11 @@ official `MetaTrader5` Python package. That package only works on Windows —
 it drives the terminal via local IPC, not a network protocol — so this file
 must run on a Windows PC or Windows VPS with MT5 installed and logged in to
 your broker. It CANNOT run in a Linux container, and it was written and
-syntax-checked but NOT executed by Claude: there is no real MT5 terminal
-available in that environment to test it against. Test it yourself against
-your own demo account before pointing a live bot at it.
+syntax-checked but not executable by Claude — no real MT5 terminal exists
+in that environment to test it against. It has since been run and verified
+live against a real Exness demo account: health/account/price/symbols,
+positions, and market + limit order placement all confirmed working
+end-to-end through a GRID bot.
 
 The Tilly backend (wherever it runs — Render or anywhere else) calls this
 service over plain HTTPS instead of talking to MT5 directly. That's the
@@ -34,6 +36,7 @@ service example so it survives reboots.
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
@@ -98,6 +101,41 @@ def _ensure_symbol(symbol: str) -> None:
         raise HTTPException(status_code=404, detail=f"Unknown symbol: {symbol}")
     if not info.visible and not mt5.symbol_select(symbol, True):
         raise HTTPException(status_code=400, detail=f"Could not select symbol: {symbol}")
+
+
+# How stale a symbol's last tick can be before we treat its market as closed.
+# A live symbol ticks at least every few seconds; anything older than this
+# means no one's quoting it right now.
+STALE_TICK_SECONDS = 120
+
+
+def _ensure_tradable(symbol: str) -> None:
+    """Fail fast, with a clear reason, instead of calling order_send() on a
+    closed market.
+
+    Found the hard way: placing a pending order on XAUUSDm over a weekend
+    (market closed) made mt5.order_send() slow enough that Cloudflare's edge
+    gave up waiting and returned its own opaque HTML 502 — the bridge's own
+    real error never made it back. Checking the symbol's trade mode and tick
+    freshness first catches the same condition in milliseconds, before ever
+    reaching the slow path.
+    """
+    info = mt5.symbol_info(symbol)
+    if info is None:
+        raise HTTPException(status_code=404, detail=f"Unknown symbol: {symbol}")
+    if info.trade_mode == mt5.SYMBOL_TRADE_MODE_DISABLED:
+        raise HTTPException(status_code=409, detail=f"Trading is disabled for {symbol}.")
+    tick = mt5.symbol_info_tick(symbol)
+    if tick is None or not tick.time:
+        raise HTTPException(
+            status_code=409, detail=f"No live price for {symbol} — market is likely closed."
+        )
+    age = time.time() - tick.time
+    if age > STALE_TICK_SECONDS:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{symbol}'s last price is {int(age)}s old — market is likely closed.",
+        )
 
 
 def _position_type(mt5_type: int) -> str:
@@ -225,6 +263,7 @@ def orders() -> list[dict]:
 @app.post("/orders/market", dependencies=[Depends(require_api_key)])
 def place_market_order(body: MarketOrderIn) -> dict:
     _ensure_symbol(body.symbol)
+    _ensure_tradable(body.symbol)
     tick = mt5.symbol_info_tick(body.symbol)
     if tick is None:
         raise HTTPException(status_code=502, detail=f"No tick data for {body.symbol}.")
@@ -251,6 +290,7 @@ def place_market_order(body: MarketOrderIn) -> dict:
 @app.post("/orders/limit", dependencies=[Depends(require_api_key)])
 def place_limit_order(body: LimitOrderIn) -> dict:
     _ensure_symbol(body.symbol)
+    _ensure_tradable(body.symbol)
     order_type = mt5.ORDER_TYPE_BUY_LIMIT if body.side == "BUY" else mt5.ORDER_TYPE_SELL_LIMIT
     request = {
         "action": mt5.TRADE_ACTION_PENDING,

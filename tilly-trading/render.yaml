@@ -64,7 +64,7 @@ services:
       - key: METAAPI_REGION
         value: new-york
       - key: ENGINE_TICK_SECONDS
-        value: "15"
+        value: "5"
       - key: REDIS_URL
         fromService:
           type: redis

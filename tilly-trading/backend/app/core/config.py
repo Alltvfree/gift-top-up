@@ -62,7 +62,7 @@ class Settings(BaseSettings):
 
     # ----- Bot engine -----
     # Seconds between engine ticks (dispatch + on_tick) in the Celery beat loop.
-    engine_tick_seconds: int = 15
+    engine_tick_seconds: int = 5
 
     # ----- AI presets (optional) -----
     openai_api_key: str = ""
