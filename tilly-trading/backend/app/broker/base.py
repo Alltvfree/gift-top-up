@@ -52,18 +52,33 @@ class BrokerClient(ABC):
         """Return the full bid/ask quote for a symbol."""
 
     @abstractmethod
-    async def place_market_order(self, symbol: str, side: str, volume: float) -> OrderResult:
-        """Place a market order."""
+    async def place_market_order(
+        self, symbol: str, side: str, volume: float, magic: int | None = None
+    ) -> OrderResult:
+        """Place a market order. `magic` tags the order with the calling
+        bot's id (see BaseBot.magic) so positions from different bots
+        sharing a symbol/account can be told apart later."""
 
     @abstractmethod
     async def place_limit_order(
-        self, symbol: str, side: str, price: float, volume: float
+        self, symbol: str, side: str, price: float, volume: float, magic: int | None = None
     ) -> OrderResult:
-        """Place a limit order."""
+        """Place a limit order. See place_market_order for `magic`."""
 
     @abstractmethod
     async def close_position(self, position_id: str) -> None:
         """Close an open position by id."""
+
+    async def get_positions(self, magic: int | None = None) -> list[dict]:
+        """Open positions, normalized to the shared dict shape (id, symbol,
+        type, volume, openPrice, currentPrice, unrealizedProfit). Not
+        abstract so old subclasses keep working, but every current adapter
+        implements it. `magic`, when given, scopes the result to positions
+        tagged with that bot's magic number — adapters that can't filter
+        server-side should filter client-side instead of ignoring it,
+        since callers rely on this to keep multiple bots on one account
+        from seeing (and closing) each other's positions."""
+        raise NotImplementedError(f"{type(self).__name__} does not support get_positions().")
 
     async def get_candles(self, symbol: str, timeframe: str, limit: int) -> list[dict]:
         """Historical OHLC bars, for adapters with a real history API (e.g.

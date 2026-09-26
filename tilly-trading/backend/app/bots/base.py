@@ -1,6 +1,7 @@
 """Base bot class — the lifecycle contract every strategy implements."""
 from __future__ import annotations
 
+import hashlib
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -13,6 +14,22 @@ class BaseBot(ABC):
         self.broker = broker
         self.params = params
         self.is_running = False
+
+    @property
+    def magic(self) -> int:
+        """Stable MT5 "magic number" for this bot, derived from its id.
+
+        A real broker account has no concept of "which Tilly bot" opened a
+        position — without tagging orders ourselves, two bots trading the
+        same symbol on the same account can't tell their own positions
+        apart from each other's (they double-count each other's P&L, and a
+        GRID bot's take-profit logic can close a position a different bot
+        opened). Derived deterministically so it's stable across restarts
+        without needing a DB column. Kept within int32 range since that's
+        the narrowest range any broker/server is guaranteed to accept.
+        """
+        digest = hashlib.sha256(self.bot_id.encode()).hexdigest()
+        return int(digest[:8], 16) % 2_000_000_000
 
     @abstractmethod
     async def initialize(self) -> None:

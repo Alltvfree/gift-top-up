@@ -46,6 +46,7 @@ class DCABot(BaseBot):
             symbol=self.params["symbol"],
             side="BUY",
             volume=lot_size,
+            magic=self.magic,
         )
         self.open_positions.append(order)
         self.order_count += 1

@@ -64,12 +64,19 @@ class MetaAPIClient(BrokerClient):
     async def get_price(self, symbol: str) -> float:
         return (await self.get_quote(symbol)).mid
 
-    async def place_market_order(self, symbol: str, side: str, volume: float) -> OrderResult:
+    async def place_market_order(
+        self, symbol: str, side: str, volume: float, magic: int | None = None
+    ) -> OrderResult:
         conn = self._conn()
+        # The SDK's TradeOptions TypedDict types `magic` as Optional[str],
+        # even though a fetched position's own `magic` field comes back as
+        # int (MetatraderPosition.magic: int) — stringify only for this
+        # request, get_positions() below compares against the int form.
+        options = {"magic": str(magic)} if magic is not None else None
         if side.upper() == "BUY":
-            result = await conn.create_market_buy_order(symbol, volume)
+            result = await conn.create_market_buy_order(symbol, volume, options=options)
         else:
-            result = await conn.create_market_sell_order(symbol, volume)
+            result = await conn.create_market_sell_order(symbol, volume, options=options)
         return OrderResult(
             id=str(result.get("orderId") or result.get("positionId") or ""),
             symbol=symbol,
@@ -79,13 +86,14 @@ class MetaAPIClient(BrokerClient):
         )
 
     async def place_limit_order(
-        self, symbol: str, side: str, price: float, volume: float
+        self, symbol: str, side: str, price: float, volume: float, magic: int | None = None
     ) -> OrderResult:
         conn = self._conn()
+        options = {"magic": str(magic)} if magic is not None else None
         if side.upper() == "BUY":
-            result = await conn.create_limit_buy_order(symbol, volume, price)
+            result = await conn.create_limit_buy_order(symbol, volume, price, options=options)
         else:
-            result = await conn.create_limit_sell_order(symbol, volume, price)
+            result = await conn.create_limit_sell_order(symbol, volume, price, options=options)
         return OrderResult(
             id=str(result.get("orderId") or ""),
             symbol=symbol,
@@ -95,8 +103,11 @@ class MetaAPIClient(BrokerClient):
             status="pending",
         )
 
-    async def get_positions(self) -> list[dict[str, Any]]:
-        return await self._conn().get_positions()
+    async def get_positions(self, magic: int | None = None) -> list[dict[str, Any]]:
+        positions = await self._conn().get_positions()
+        if magic is None:
+            return positions
+        return [p for p in positions if p.get("magic", magic) == magic]
 
     async def get_orders(self) -> list[dict[str, Any]]:
         return await self._conn().get_orders()

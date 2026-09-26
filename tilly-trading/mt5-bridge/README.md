@@ -140,8 +140,16 @@ means bots silently stop trading.
 - This bridge can place and close real trades. Start on a demo account.
   Nothing in Tilly currently confirms "this is a live account, are you
   sure" before a bot starts trading through it — that's on you to check.
-- `DEVIATION_POINTS` (max slippage) and `MAGIC` (order tag) are constants
-  near the top of `bridge.py` — adjust for your broker/symbol if needed.
+- `DEVIATION_POINTS` (max slippage) and `MAGIC` (default order tag, used
+  when a request doesn't send its own) are constants near the top of
+  `bridge.py` — adjust for your broker/symbol if needed.
+- **Multiple Tilly bots sharing one account/symbol are isolated by `magic`.**
+  Every order Tilly places is tagged with a per-bot magic number, and
+  `GET /positions?magic=` filters to just that bot's own positions — MT5
+  itself has no other concept of "which bot" opened a position, so without
+  this, two bots on the same symbol would see (and could close) each
+  other's trades. If you call this bridge directly rather than through
+  Tilly, omit `magic` and every position on the account is returned.
 
 ## Endpoint reference
 
@@ -150,11 +158,11 @@ means bots silently stop trading.
 | GET | `/health` | — | `{ok, logged_in, account}` |
 | GET | `/account` | — | `{balance, equity, currency}` |
 | GET | `/price/{symbol}` | — | `{bid, ask}` |
-| GET | `/positions` | — | `[{id, symbol, type, volume, openPrice, currentPrice, unrealizedProfit}]` |
+| GET | `/positions?magic=` | — | `[{id, symbol, type, volume, openPrice, currentPrice, unrealizedProfit, magic}]` — `magic` filters to one bot's positions, omit for all |
 | GET | `/symbols` | — | `["EURUSD", "XAUUSDm", ...]` — every symbol name this terminal/broker knows |
 | GET | `/candles/{symbol}?timeframe=&limit=` | — | `{symbol, timeframe, bars: [{time, open, high, low, close}]}` — real history via `copy_rates_from_pos` |
 | GET | `/orders` | — | `[{id, symbol, type, openPrice, volume}]` |
-| POST | `/orders/market` | `{symbol, side, volume}` | `{id, filled_price, status}` |
-| POST | `/orders/limit` | `{symbol, side, price, volume}` | `{id, status}` |
+| POST | `/orders/market` | `{symbol, side, volume, magic?}` | `{id, filled_price, status}` |
+| POST | `/orders/limit` | `{symbol, side, price, volume, magic?}` | `{id, status}` |
 | POST | `/positions/{id}/close` | — | `{ok}` |
 | POST | `/orders/{id}/cancel` | — | `{ok}` |

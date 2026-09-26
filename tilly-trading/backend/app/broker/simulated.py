@@ -115,7 +115,14 @@ class SimulatedBroker(BrokerClient):
         return round(sum(self._pos_pnl(p) for p in self._positions), 2)
 
     # ---- orders ----
-    async def place_market_order(self, symbol: str, side: str, volume: float) -> OrderResult:
+    # `magic` is accepted but unused: each running bot gets its own
+    # SimulatedBroker instance (see engine.py's per-bot broker construction),
+    # so positions are already isolated per bot without needing a tag — the
+    # parameter exists purely so callers can pass it uniformly across every
+    # broker adapter regardless of which one is actually in use.
+    async def place_market_order(
+        self, symbol: str, side: str, volume: float, magic: int | None = None
+    ) -> OrderResult:
         price = self._price(symbol)
         pid = str(uuid.uuid4())
         self._positions.append(
@@ -124,14 +131,16 @@ class SimulatedBroker(BrokerClient):
         return OrderResult(id=pid, symbol=symbol, side=side.upper(), volume=volume,
                            filled_price=price, status="filled")
 
-    async def place_limit_order(self, symbol: str, side: str, price: float, volume: float) -> OrderResult:
+    async def place_limit_order(
+        self, symbol: str, side: str, price: float, volume: float, magic: int | None = None
+    ) -> OrderResult:
         oid = str(uuid.uuid4())
         self._pending.append(_PendingOrder(id=oid, symbol=symbol, side=side.upper(),
                                            price=price, volume=volume))
         return OrderResult(id=oid, symbol=symbol, side=side.upper(), volume=volume,
                            filled_price=price, status="pending")
 
-    async def get_positions(self) -> list[dict]:
+    async def get_positions(self, magic: int | None = None) -> list[dict]:
         return [
             {
                 "id": p.id,

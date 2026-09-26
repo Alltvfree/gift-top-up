@@ -44,10 +44,10 @@ class GridBot(BaseBot):
             sell_price = current_price + (i * self.grid_spacing)
 
             buy_order = await self.broker.place_limit_order(
-                symbol=symbol, side="BUY", price=buy_price, volume=lot
+                symbol=symbol, side="BUY", price=buy_price, volume=lot, magic=self.magic
             )
             sell_order = await self.broker.place_limit_order(
-                symbol=symbol, side="SELL", price=sell_price, volume=lot
+                symbol=symbol, side="SELL", price=sell_price, volume=lot, magic=self.magic
             )
             self.pending_orders[buy_order.id] = {
                 "type": "BUY",
@@ -68,8 +68,13 @@ class GridBot(BaseBot):
         # leg sat open forever until this existed. Deliberately doesn't
         # re-arm a replacement order on close — the ladder shrinks instead of
         # growing without bound, which is the safe direction to be wrong in.
+        #
+        # get_positions(magic=self.magic) matters as much as the symbol
+        # filter below: without it, this would also see (and could close)
+        # positions opened by a *different* bot trading the same symbol on
+        # the same account.
         try:
-            positions = await self.broker.get_positions()
+            positions = await self.broker.get_positions(magic=self.magic)
         except Exception:  # noqa: BLE001 - a broker hiccup shouldn't crash the tick
             return
 

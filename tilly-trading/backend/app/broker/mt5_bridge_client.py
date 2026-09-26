@@ -15,13 +15,13 @@ implementation):
     GET  /health                                  -> {"ok": bool}
     GET  /account                                  -> {"balance", "equity", "currency"}
     GET  /price/{symbol}                           -> {"bid", "ask"}
-    GET  /positions                                -> [{"id","symbol","type",
+    GET  /positions?magic=                         -> [{"id","symbol","type",
                                                           "volume","openPrice",
-                                                          "currentPrice","unrealizedProfit"}]
+                                                          "currentPrice","unrealizedProfit","magic"}]
     GET  /candles/{symbol}?timeframe=&limit=       -> {"bars": [{"time","open","high","low","close"}]}
     GET  /symbols                                  -> ["EURUSD", "XAUUSDm", ...]
-    POST /orders/market   {"symbol","side","volume"}        -> {"id","filled_price","status"}
-    POST /orders/limit    {"symbol","side","price","volume"} -> {"id","status"}
+    POST /orders/market   {"symbol","side","volume","magic"?}        -> {"id","filled_price","status"}
+    POST /orders/limit    {"symbol","side","price","volume","magic"?} -> {"id","status"}
     POST /positions/{id}/close                     -> {"ok": bool}
     POST /orders/{id}/cancel                       -> {"ok": bool}
 """
@@ -95,10 +95,13 @@ class MT5BridgeClient(BrokerClient):
         return (await self.get_quote(symbol)).mid
 
     # ---- orders ----
-    async def place_market_order(self, symbol: str, side: str, volume: float) -> OrderResult:
-        result = await self._request(
-            "POST", "/orders/market", json={"symbol": symbol, "side": side.upper(), "volume": volume}
-        )
+    async def place_market_order(
+        self, symbol: str, side: str, volume: float, magic: int | None = None
+    ) -> OrderResult:
+        body: dict[str, Any] = {"symbol": symbol, "side": side.upper(), "volume": volume}
+        if magic is not None:
+            body["magic"] = magic
+        result = await self._request("POST", "/orders/market", json=body)
         return OrderResult(
             id=str(result.get("id", "")),
             symbol=symbol,
@@ -109,13 +112,12 @@ class MT5BridgeClient(BrokerClient):
         )
 
     async def place_limit_order(
-        self, symbol: str, side: str, price: float, volume: float
+        self, symbol: str, side: str, price: float, volume: float, magic: int | None = None
     ) -> OrderResult:
-        result = await self._request(
-            "POST",
-            "/orders/limit",
-            json={"symbol": symbol, "side": side.upper(), "price": price, "volume": volume},
-        )
+        body: dict[str, Any] = {"symbol": symbol, "side": side.upper(), "price": price, "volume": volume}
+        if magic is not None:
+            body["magic"] = magic
+        result = await self._request("POST", "/orders/limit", json=body)
         return OrderResult(
             id=str(result.get("id", "")),
             symbol=symbol,
@@ -125,8 +127,9 @@ class MT5BridgeClient(BrokerClient):
             status=result.get("status", "pending"),
         )
 
-    async def get_positions(self) -> list[dict[str, Any]]:
-        result = await self._http().get("/positions")
+    async def get_positions(self, magic: int | None = None) -> list[dict[str, Any]]:
+        params = {"magic": magic} if magic is not None else None
+        result = await self._http().get("/positions", params=params)
         if result.status_code >= 400:
             raise MT5BridgeError(f"MT5 bridge GET /positions -> {result.status_code}: {result.text[:300]}")
         return result.json()

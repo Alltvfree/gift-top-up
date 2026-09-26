@@ -175,10 +175,21 @@ class TradingEngine:
         realized figure is a same-tick approximation, not a booked exit price.
         """
         try:
-            broker_positions = await running.broker.get_positions()
+            broker_positions = await running.broker.get_positions(magic=running.strategy.magic)
         except Exception:  # noqa: BLE001
             return
-        mine = [p for p in broker_positions if p.get("symbol") == running.symbol]
+        # Filter by magic again client-side (belt and suspenders): several
+        # bots can share one broker account/symbol, and a broker adapter
+        # that doesn't (or can't) filter server-side would otherwise leak
+        # another bot's positions into this bot's PnL and Position rows —
+        # which is exactly what happened before every bot tagged its own
+        # orders with a magic number.
+        my_magic = running.strategy.magic
+        mine = [
+            p
+            for p in broker_positions
+            if p.get("symbol") == running.symbol and p.get("magic", my_magic) == my_magic
+        ]
         live_ids = {str(p.get("id", "")) for p in mine}
 
         existing = (

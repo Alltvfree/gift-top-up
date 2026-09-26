@@ -158,6 +158,7 @@ class MarketOrderIn(BaseModel):
     symbol: str
     side: Literal["BUY", "SELL"]
     volume: float
+    magic: int | None = None  # per-bot tag; falls back to the bridge-wide MAGIC if omitted
 
 
 class LimitOrderIn(BaseModel):
@@ -165,6 +166,7 @@ class LimitOrderIn(BaseModel):
     side: Literal["BUY", "SELL"]
     price: float
     volume: float
+    magic: int | None = None
 
 
 # ---------------------------------------------------------------- routes ---
@@ -204,8 +206,15 @@ def symbols() -> list[str]:
 
 
 @app.get("/positions", dependencies=[Depends(require_api_key)])
-def positions() -> list[dict]:
+def positions(magic: int | None = None) -> list[dict]:
+    """`magic`, when given, scopes results to that bot's own positions —
+    several Tilly bots can share one MT5 account/symbol, and without this
+    filter each of them would see (and could close) every other bot's
+    positions too, since MT5 itself has no concept of "which bot" beyond
+    the magic number we tag orders with."""
     rows = mt5.positions_get() or ()
+    if magic is not None:
+        rows = [p for p in rows if p.magic == magic]
     return [
         {
             "id": str(p.ticket),
@@ -215,6 +224,7 @@ def positions() -> list[dict]:
             "openPrice": p.price_open,
             "currentPrice": p.price_current,
             "unrealizedProfit": p.profit,
+            "magic": p.magic,
         }
         for p in rows
     ]
@@ -276,7 +286,7 @@ def place_market_order(body: MarketOrderIn) -> dict:
         "type": order_type,
         "price": price_,
         "deviation": DEVIATION_POINTS,
-        "magic": MAGIC,
+        "magic": body.magic if body.magic is not None else MAGIC,
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_IOC,
     }
@@ -298,7 +308,7 @@ def place_limit_order(body: LimitOrderIn) -> dict:
         "volume": body.volume,
         "type": order_type,
         "price": body.price,
-        "magic": MAGIC,
+        "magic": body.magic if body.magic is not None else MAGIC,
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_RETURN,
     }
