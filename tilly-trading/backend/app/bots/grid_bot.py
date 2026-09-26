@@ -59,34 +59,37 @@ class GridBot(BaseBot):
             }
 
     async def on_tick(self, symbol: str, bid: float, ask: float) -> None:
-        # GRID reacts to fills, not ticks; nothing to do per tick.
-        return
-
-    async def on_order_filled(self, order_id: str, fill_price: float, volume: float) -> None:
-        if order_id not in self.pending_orders:
+        # Take profit each filled leg once price has moved one grid_spacing in
+        # its favor. This is the code that actually closes GRID positions —
+        # on_order_filled() below never runs (the engine has no reliable way
+        # to match a broker's post-fill position id back to the order id
+        # that opened it: MT5 and most real brokers mint a new ticket for the
+        # resulting position, not the pending order's id), so every filled
+        # leg sat open forever until this existed. Deliberately doesn't
+        # re-arm a replacement order on close — the ladder shrinks instead of
+        # growing without bound, which is the safe direction to be wrong in.
+        try:
+            positions = await self.broker.get_positions()
+        except Exception:  # noqa: BLE001 - a broker hiccup shouldn't crash the tick
             return
 
-        order_info = self.pending_orders.pop(order_id)
+        for p in positions:
+            if p.get("symbol") != symbol:
+                continue
+            side = str(p.get("type", "")).replace("POSITION_TYPE_", "")
+            open_price = float(p.get("openPrice", 0) or 0)
+            if side == "BUY":
+                target = open_price + self.grid_spacing
+                hit = bid >= target
+            else:
+                target = open_price - self.grid_spacing
+                hit = ask <= target
+            if hit:
+                position_id = str(p.get("id", ""))
+                if position_id:
+                    await self.broker.close_position(position_id)
 
-        # Place the opposite order one grid level away to bank the spread.
-        if order_info["type"] == "BUY":
-            opposite_price = fill_price + self.grid_spacing
-            new_order = await self.broker.place_limit_order(
-                symbol=self.params["symbol"],
-                side="SELL",
-                price=opposite_price,
-                volume=volume,
-            )
-        else:
-            opposite_price = fill_price - self.grid_spacing
-            new_order = await self.broker.place_limit_order(
-                symbol=self.params["symbol"],
-                side="BUY",
-                price=opposite_price,
-                volume=volume,
-            )
-
-        self.pending_orders[new_order.id] = {
-            "type": "SELL" if order_info["type"] == "BUY" else "BUY",
-            "opposite_price": fill_price,
-        }
+    async def on_order_filled(self, order_id: str, fill_price: float, volume: float) -> None:
+        # Never called — see on_tick(), which does the real closing work.
+        # Kept only because BaseBot declares it abstract.
+        return
