@@ -27,63 +27,79 @@ that map 1:1 onto the same `BrokerClient` contract MetaAPI and the paper
 provider already implement — so once it's linked, GRID/DCA bots, the engine,
 and the dashboard work identically, no matter which provider is behind them.
 
-## Setup: per-client VPS (recommended, scripted)
+## Setup: one shared VPS, many clients (recommended, scripted)
 
-Every account — yours or a client's — needs its own bridge. Rather than
-asking a client to install Python and MT5 on their own PC, provision them a
-small Windows VPS (widely sold cheap specifically for running MetaTrader —
-search "Windows VPS MT5/MT4 hosting"), get their MT5 login/password/server
-from them, and run this **on that VPS**, as Administrator, over RDP:
+Every account — yours or a client's — needs its own bridge, but they don't
+need their own machine. MetaTrader5's Python package can only talk to ONE
+terminal per process, so running several clients on one box means each
+gets its own **isolated copy** of the MT5 terminal (a plain folder copy —
+MetaTrader derives its per-install data directory from the install path,
+so two copies in two different folders are automatically independent, no
+special "portable" flag needed) plus its own `bridge.py` process on its own
+port. Everything else — Python, cloudflared, the VPS itself — is shared.
 
-1. **Install MetaTrader 5** on the VPS (the broker's own installer) — you
-   don't need to log in manually, the script below does it.
+1. **Provision one Windows VPS** (widely sold cheap specifically for this —
+   search "Windows VPS MT5/MT4 hosting"), RDP into it, and copy this
+   `mt5-bridge/` folder onto it.
 
-2. **Copy this `mt5-bridge/` folder to the VPS**, then run:
+2. **One-time per VPS** — install Python and cloudflared:
    ```powershell
-   .\install-windows.ps1 -Mt5Login "414312080" -Mt5Password "the-clients-password" -Mt5Server "Exness-MT5Real8"
+   .\bootstrap-vps.ps1
    ```
-   This installs Python if missing, installs dependencies, generates an API
-   key, writes a launcher with the MT5 credentials baked in, registers a
-   Scheduled Task so it survives reboots, starts it, and hits `/health` to
-   confirm it's actually up. It prints the generated API key at the end —
-   save it.
 
-3. **Give it a permanent URL:**
+3. **Install each broker's MT5 terminal you'll need, once, as a "master" copy**
+   — e.g. the broker's normal installer into `C:\MT5-Master-Exness\`. Don't
+   log in to it; `add-client.ps1` clones it fresh per client.
+
+4. **For each client**, run:
+   ```powershell
+   .\add-client.ps1 -ClientSlug "acme" -Mt5Login "12345678" -Mt5Password "their-password" -Mt5Server "Exness-MT5Real8" -MasterTerminalDir "C:\MT5-Master-Exness"
+   ```
+   This clones the master terminal into its own folder, picks the next
+   free port automatically, generates an API key, registers a dedicated
+   Scheduled Task, starts it, and confirms `/health` responds. It prints
+   the API key at the end — save it.
+
+5. **Give that client a permanent URL:**
    ```powershell
    .\setup-tunnel.ps1 -ClientSlug "acme" -Domain "bridges.yourdomain.com"
    ```
    Needs a domain (or subdomain) that's an active zone in your Cloudflare
    account — set one aside for this, don't reuse a domain serving another
-   site. The first time you run this on a *new* VPS it opens a browser for
-   `cloudflared tunnel login`; skip that by copying `cert.pem` from a VPS
-   you've already logged in on (same Cloudflare account) and passing
-   `-CertPath`. Unlike a quick tunnel (`cloudflared tunnel --url ...`),
-   this URL is permanent — it survives reboots and doesn't change.
+   site. The first time you run this on a VPS it opens a browser for
+   `cloudflared tunnel login`; every client added after that on the same
+   VPS reuses the same login automatically. Each client still gets their
+   own tunnel process, so one client's tunnel restarting never touches
+   another's. Unlike a quick tunnel (`cloudflared tunnel --url ...`), this
+   URL is permanent.
 
-4. **Link it in Tilly** — Account page → **+ BRIDGE** → paste the printed
-   `https://acme.bridges.yourdomain.com` URL and the API key from step 2.
+6. **Link it in Tilly** — Account page → **+ BRIDGE** → paste the printed
+   `https://acme.bridges.yourdomain.com` URL and the API key from step 4.
    Tilly does a live round trip (`/health` + `/account`) before saving, so
    a wrong URL/key fails immediately instead of silently.
 
-> **Written, not run.** Both scripts were authored and reviewed carefully —
-> checked for balanced braces/parens, matched against the exact PowerShell
-> patterns already verified working on a real Windows box earlier in this
-> project (Task Scheduler with `-LogonType Interactive`, corrected
-> `-AllowStartIfOnBatteries` pluralization) — but this sandbox has no
-> Windows machine to actually execute them against. Dry-run on a throwaway
-> VPS with a demo account first.
+Repeat steps 4–6 for the next client — steps 1–3 are one-time per VPS.
 
-**Critical VPS gotcha:** the bridge runs as a Scheduled Task tied to an
-*interactive logon session*, not a true background service — MT5's IPC only
-works inside a real desktop session (a true Windows service runs in Session
-0, which is isolated from it). On a VPS this means: after running the
-scripts, **disconnect your RDP client, don't log off**. Disconnecting keeps
-the session (and the task) alive; logging off ends it and kills the bridge.
+> **Written, not run.** All four scripts were authored and reviewed
+> carefully — checked for balanced braces/parens, matched against the
+> exact PowerShell patterns already verified working on a real Windows box
+> earlier in this project (Task Scheduler with `-LogonType Interactive`,
+> corrected `-AllowStartIfOnBatteries` pluralization) — but this sandbox
+> has no Windows machine to actually execute them against. Dry-run on a
+> throwaway VPS with a demo account first.
 
-## Setup: manual / your own PC
+**Critical VPS gotcha:** every bridge and tunnel runs as a Scheduled Task
+tied to an *interactive logon session*, not a true background service —
+MT5's IPC only works inside a real desktop session (a true Windows service
+runs in Session 0, which is isolated from it). This means: after setting
+up, **disconnect your RDP client, don't log off**. Disconnecting keeps the
+session — and every client's bridge/tunnel running in it — alive; logging
+off ends the session and kills all of them at once.
 
-If you're running this on your own always-on PC (not a client VPS), or want
-to understand what the scripts above automate:
+## Setup: manual / a single always-on PC
+
+If you're running this on your own PC with just one account (not a shared
+client VPS), or want to understand what the scripts above automate:
 
 1. Install MetaTrader 5, log in, leave the terminal open. "Algo Trading"
    must be enabled (top toolbar) or `order_send` calls are rejected.
@@ -105,10 +121,11 @@ to understand what the scripts above automate:
 ## Keeping it running
 
 `uvicorn` in a terminal window dies when you close the window or the PC
-sleeps. `install-windows.ps1` handles this via a Scheduled Task; doing it by
-hand with [NSSM](https://nssm.cc/) also works, though NSSM registers a true
-Windows service, which hits the Session 0 IPC problem above — the Scheduled
-Task approach is the one that's actually been confirmed working. Either way,
+sleeps. `add-client.ps1` (and `bootstrap-vps.ps1`'s single-PC equivalent)
+handles this via a Scheduled Task; doing it by hand with
+[NSSM](https://nssm.cc/) also works, though NSSM registers a true Windows
+service, which hits the Session 0 IPC problem above — the Scheduled Task
+approach is the one that's actually been confirmed working. Either way,
 disable Windows sleep/hibernate — a sleeping PC means a sleeping bridge
 means bots silently stop trading.
 

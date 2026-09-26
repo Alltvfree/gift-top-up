@@ -1,31 +1,40 @@
 <#
 .SYNOPSIS
-    Give this client's bridge a permanent HTTPS URL via a named Cloudflare Tunnel.
+    Give one client's bridge a permanent HTTPS URL via a named Cloudflare Tunnel.
 
 .DESCRIPTION
-    Run this AFTER install-windows.ps1 on the same VPS. A quick tunnel
+    Run this AFTER add-client.ps1 for that same -ClientSlug. A quick tunnel
     (`cloudflared tunnel --url ...`) gets a brand new random URL every
     time it restarts, which breaks a bridge_url already saved in Tilly's
     database — this script instead creates a NAMED tunnel bound to a
     subdomain you choose, so the URL never changes across reboots.
 
+    Each client gets their own tunnel process and Scheduled Task (not one
+    shared tunnel for the whole VPS), so restarting or re-routing one
+    client's tunnel never touches anyone else's — the only thing clients
+    share on this box is the Cloudflare login (cert.pem) and the Python
+    install from bootstrap-vps.ps1.
+
     Named tunnels are scoped to a Cloudflare account and need a one-time
     login (`cloudflared tunnel login`), which opens a browser — only
     possible if you're at this VPS over RDP with a browser available, or
-    you've already logged in on another machine and copy that machine's
-    cert.pem here (pass -CertPath to skip the interactive login).
+    you've already logged in on another machine (or for an earlier client
+    on this same VPS) and copy that cert.pem here (-CertPath). Once
+    cert.pem exists on this VPS, every later client on it reuses it
+    automatically — you only do the interactive login once per VPS.
 
     Requires: the chosen -Domain is already an active zone in the SAME
     Cloudflare account cloudflared logs into (Cloudflare dashboard -> Add a
     site). Use a domain/subdomain set aside for client bridges — not one
     already serving another site, to avoid DNS record collisions.
 
-    Same caveat as install-windows.ps1: written and reviewed, not executed
-    against a live Cloudflare account or VPS.
+    Same caveat as the rest of this bridge: written and reviewed, not
+    executed against a live Cloudflare account or VPS.
 
 .PARAMETER ClientSlug
-    Short, URL-safe identifier for this client, e.g. "acme" or "client07".
-    Becomes both the tunnel name (tilly-<slug>) and the subdomain.
+    Short, URL-safe identifier for this client, e.g. "acme". Must match
+    what you passed to add-client.ps1. Becomes both the tunnel name
+    (tilly-<slug>) and the subdomain.
 
 .PARAMETER Domain
     The Cloudflare-managed domain to publish under, e.g. "bridges.example.com".
@@ -37,7 +46,12 @@
     skip the interactive browser login on a headless/RDP-less VPS.
 
 .PARAMETER Port
-    Local port the bridge listens on. Must match install-windows.ps1's -Port.
+    Local port this client's bridge listens on. Omit to read it from
+    clients\<ClientSlug>\port.txt, written by add-client.ps1.
+
+.PARAMETER BridgeDir
+    Folder containing the clients\ directory. Defaults to this script's
+    own folder — only needed if you moved things around.
 
 .EXAMPLE
     .\setup-tunnel.ps1 -ClientSlug "acme" -Domain "bridges.example.com"
@@ -56,48 +70,24 @@ param(
 
     [string]$CertPath = "",
 
-    [int]$Port = 8787,
+    [int]$Port = 0,
 
-    [string]$TaskName = "TillyMT5Tunnel"
+    [string]$BridgeDir = $PSScriptRoot
 )
 
 $ErrorActionPreference = "Stop"
-
-function Assert-Admin {
-    $current = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object Security.Principal.WindowsPrincipal($current)
-    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw "Run this script from an elevated (Administrator) PowerShell window."
-    }
-}
-
-function Ensure-Cloudflared {
-    $cf = Get-Command cloudflared -ErrorAction SilentlyContinue
-    if ($cf) {
-        Write-Host "cloudflared found: $($cf.Source)"
-        return $cf.Source
-    }
-
-    Write-Host "cloudflared not found — downloading..."
-    $installDir = "C:\Program Files\cloudflared"
-    New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-    $exePath = Join-Path $installDir "cloudflared.exe"
-    Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" `
-        -OutFile $exePath -UseBasicParsing
-
-    $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
-    if ($machinePath -notlike "*$installDir*") {
-        [Environment]::SetEnvironmentVariable("Path", "$machinePath;$installDir", "Machine")
-    }
-    $env:Path = "$env:Path;$installDir"
-
-    Write-Host "cloudflared installed: $exePath"
-    return $exePath
-}
+. (Join-Path $PSScriptRoot "common.ps1")
 
 Assert-Admin
 
-Write-Host "== Tilly MT5 bridge tunnel setup ==" -ForegroundColor Cyan
+if ($Port -eq 0) {
+    $portFile = Join-Path $BridgeDir "clients\$ClientSlug\port.txt"
+    if (-not (Test-Path $portFile)) {
+        throw "No -Port given and $portFile doesn't exist — run add-client.ps1 for '$ClientSlug' first, or pass -Port explicitly."
+    }
+    $Port = [int](Get-Content $portFile -Raw).Trim()
+}
+Write-Host "== Tunnel setup for client '$ClientSlug' (port $Port) ==" -ForegroundColor Cyan
 
 $cloudflaredExe = Ensure-Cloudflared
 $cfDir = Join-Path $env:USERPROFILE ".cloudflared"
@@ -109,15 +99,15 @@ if (-not (Test-Path $certDest)) {
         Copy-Item -Path $CertPath -Destination $certDest
         Write-Host "Copied existing Cloudflare origin cert from $CertPath."
     } else {
-        Write-Host "No cert.pem found — opening the interactive Cloudflare login."
-        Write-Host "(If this VPS has no browser/RDP session, log in on another machine and re-run with -CertPath instead.)"
+        Write-Host "No cert.pem found on this VPS yet — opening the interactive Cloudflare login."
+        Write-Host "(This only happens once per VPS. If this VPS has no browser/RDP session, log in on another machine and re-run with -CertPath instead.)"
         & $cloudflaredExe tunnel login
         if (-not (Test-Path $certDest)) {
             throw "cloudflared login did not produce a cert.pem — aborting."
         }
     }
 } else {
-    Write-Host "Existing Cloudflare origin cert found — reusing it."
+    Write-Host "Existing Cloudflare origin cert found on this VPS — reusing it."
 }
 
 $tunnelName = "tilly-$ClientSlug"
@@ -169,31 +159,17 @@ if ($LASTEXITCODE -ne 0) {
     Write-Warning "DNS route may already exist or failed — check the Cloudflare dashboard for $Domain if the URL doesn't resolve."
 }
 
-# Same interactive-session reasoning as install-windows.ps1's Scheduled
-# Task: this must stay tied to a logged-on session, not a Session-0 service.
-$action = New-ScheduledTaskAction -Execute $cloudflaredExe `
+$taskName = "TillyMT5Tunnel-$ClientSlug"
+Register-InteractiveTask -TaskName $taskName -Execute $cloudflaredExe `
     -Argument "tunnel --config `"$configPath`" run $tunnelName"
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -DontStopOnIdleEnd `
-    -ExecutionTimeLimit ([TimeSpan]::Zero) `
-    -RestartCount 3 `
-    -RestartInterval (New-TimeSpan -Minutes 1)
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
-
-Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-    -Settings $settings -Principal $principal | Out-Null
-Write-Host "Registered Scheduled Task '$TaskName' (starts at logon, restarts on failure)."
+Write-Host "Registered Scheduled Task '$taskName' (starts at logon, restarts on failure)."
 
 Write-Host "Starting the tunnel now..."
-Start-ScheduledTask -TaskName $TaskName
+Start-ScheduledTask -TaskName $taskName
 Start-Sleep -Seconds 5
 
 Write-Host ""
 Write-Host "== Done ==" -ForegroundColor Cyan
 Write-Host "Bridge URL (permanent, survives reboots): https://$hostname" -ForegroundColor Green
 Write-Host "DNS can take a minute or two to propagate. Once it resolves, paste this URL"
-Write-Host "plus the API key from install-windows.ps1 into Tilly's Account page -> + BRIDGE."
+Write-Host "plus the API key add-client.ps1 printed into Tilly's Account page -> + BRIDGE."
