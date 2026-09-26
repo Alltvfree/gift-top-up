@@ -9,7 +9,6 @@ import {
   addPaperAccount,
   API_URL,
   brokerApiConfigured,
-  linkBroker,
   linkMt5Bridge,
   pingAuthedPost,
   pingBackend,
@@ -30,7 +29,6 @@ function Account() {
   const { user, signOut, changePassword } = useAuth();
   const [accounts, setAccounts] = useState<BrokerAccountRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showLink, setShowLink] = useState(false);
   const [showBridge, setShowBridge] = useState(false);
   const [paperBusy, setPaperBusy] = useState(false);
   const admin = isAdmin(user);
@@ -110,16 +108,19 @@ function Account() {
       </section>
 
       {admin && (
-        <Link
-          href="/admin"
-          className="flex items-center justify-between rounded-xl border border-amber/30 bg-amber/10 p-4 transition active:scale-[0.99]"
-        >
-          <div>
-            <div className="text-sm font-semibold text-amber">Admin panel</div>
-            <div className="font-mono text-[10px] text-muted">System health · platform controls</div>
-          </div>
-          <span className="text-amber">→</span>
-        </Link>
+        <>
+          <Link
+            href="/admin"
+            className="flex items-center justify-between rounded-xl border border-amber/30 bg-amber/10 p-4 transition active:scale-[0.99]"
+          >
+            <div>
+              <div className="text-sm font-semibold text-amber">Admin panel</div>
+              <div className="font-mono text-[10px] text-muted">System health · platform controls</div>
+            </div>
+            <span className="text-amber">→</span>
+          </Link>
+          <ApiDiagnostics />
+        </>
       )}
 
       <section className="rounded-xl border border-line bg-panel p-4">
@@ -182,12 +183,6 @@ function Account() {
               {paperBusy ? "…" : "+ PAPER"}
             </button>
             <button
-              onClick={() => setShowLink((v) => !v)}
-              className="rounded border border-amber/40 bg-amber/10 px-2 py-1 font-mono text-[10px] font-semibold text-amber"
-            >
-              {showLink ? "CLOSE" : "+ LINK"}
-            </button>
-            <button
               onClick={() => setShowBridge((v) => !v)}
               className="rounded border border-amber/40 bg-amber/10 px-2 py-1 font-mono text-[10px] font-semibold text-amber"
             >
@@ -195,15 +190,6 @@ function Account() {
             </button>
           </div>
         </div>
-
-        {showLink && (
-          <LinkBrokerForm
-            onDone={() => {
-              setShowLink(false);
-              loadAccounts();
-            }}
-          />
-        )}
 
         {showBridge && (
           <BridgeLinkForm
@@ -220,7 +206,9 @@ function Account() {
           <div className="rounded-lg border border-dashed border-line bg-panel/50 p-5 text-center">
             <div className="font-mono text-sm font-semibold text-fg">No accounts linked</div>
             <p className="mx-auto mt-1 max-w-[260px] text-[11px] text-muted">
-              Link an Exness / XM / Vantage MetaTrader account to trade.
+              Every account — yours or a client&apos;s — connects through its own self-hosted MT5
+              bridge. Tap + BRIDGE to get started, or add a free paper account to try the
+              platform without a live connection.
             </p>
           </div>
         ) : (
@@ -278,133 +266,48 @@ function statusDot(status: string | null, active: boolean): string {
   return "bg-muted";
 }
 
-function LinkBrokerForm({ onDone }: { onDone: () => void }) {
-  const [broker, setBroker] = useState("exness");
-  const [login, setLogin] = useState("");
-  const [password, setPassword] = useState("");
-  const [server, setServer] = useState("");
-  const [platform, setPlatform] = useState<"mt4" | "mt5">("mt5");
-  const [accountType, setAccountType] = useState<"demo" | "live">("demo");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+/** Admin-only connectivity check for the deployed backend — not a broker form. */
+function ApiDiagnostics() {
   const [ping, setPing] = useState<string | null>(null);
 
-  if (!brokerApiConfigured) {
-    return (
-      <div className="mb-2 rounded-lg border border-amber/30 bg-amber/10 p-3 font-mono text-[11px] text-amber">
-        Backend not connected yet. Set NEXT_PUBLIC_API_URL (your deployed Tilly API) in Cloudflare
-        Pages, then reload to link a broker.
-      </div>
-    );
-  }
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await linkBroker({
-        broker_name: broker,
-        login,
-        password,
-        server,
-        platform,
-        account_type: accountType,
-      });
-      onDone();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Linking failed.");
-      setBusy(false);
-    }
-  }
-
-  const field =
-    "h-9 w-full rounded-lg border border-line bg-ink px-3 text-sm text-fg outline-none placeholder:text-muted/50 focus:border-amber/60";
-
   return (
-    <form onSubmit={submit} className="mb-2 space-y-2 rounded-lg border border-line bg-panel p-3">
-      <div className="rounded-md border border-line bg-ink p-2">
-        <div className="font-mono text-[9px] tracking-widest text-muted">API</div>
-        <div className="break-all font-mono text-[10px] text-fg">{API_URL || "(not set)"}</div>
-        <div className="mt-1 flex gap-2">
-          <button
-            type="button"
-            onClick={async () => {
-              setPing("testing…");
-              setPing(await pingBackend());
-            }}
-            className="rounded border border-line bg-panel2 px-2 py-1 font-mono text-[10px] text-amber"
-          >
-            Test GET
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              setPing("testing…");
-              setPing(await pingAuthedPost());
-            }}
-            className="rounded border border-line bg-panel2 px-2 py-1 font-mono text-[10px] text-amber"
-          >
-            Test authed POST
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              setPing("testing…");
-              setPing(await pingDB());
-            }}
-            className="rounded border border-line bg-panel2 px-2 py-1 font-mono text-[10px] text-amber"
-          >
-            Test DB
-          </button>
-        </div>
-        {ping && <div className="mt-1 break-all font-mono text-[10px] text-up">{ping}</div>}
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <select value={broker} onChange={(e) => setBroker(e.target.value)} className={field}>
-          <option value="exness">Exness</option>
-          <option value="xm">XM</option>
-          <option value="vantage">Vantage</option>
-        </select>
-        <select
-          value={accountType}
-          onChange={(e) => setAccountType(e.target.value as "demo" | "live")}
-          className={field}
+    <div className="rounded-lg border border-line bg-panel p-3">
+      <div className="font-mono text-[9px] tracking-widest text-muted">API</div>
+      <div className="break-all font-mono text-[10px] text-fg">{API_URL || "(not set)"}</div>
+      <div className="mt-1 flex gap-2">
+        <button
+          type="button"
+          onClick={async () => {
+            setPing("testing…");
+            setPing(await pingBackend());
+          }}
+          className="rounded border border-line bg-panel2 px-2 py-1 font-mono text-[10px] text-amber"
         >
-          <option value="demo">Demo</option>
-          <option value="live">Live</option>
-        </select>
+          Test GET
+        </button>
+        <button
+          type="button"
+          onClick={async () => {
+            setPing("testing…");
+            setPing(await pingAuthedPost());
+          }}
+          className="rounded border border-line bg-panel2 px-2 py-1 font-mono text-[10px] text-amber"
+        >
+          Test authed POST
+        </button>
+        <button
+          type="button"
+          onClick={async () => {
+            setPing("testing…");
+            setPing(await pingDB());
+          }}
+          className="rounded border border-line bg-panel2 px-2 py-1 font-mono text-[10px] text-amber"
+        >
+          Test DB
+        </button>
       </div>
-      <input className={field} placeholder="Login (account number)" value={login} onChange={(e) => setLogin(e.target.value)} />
-      <input className={field} type="password" placeholder="Investor / master password" value={password} onChange={(e) => setPassword(e.target.value)} />
-      <input className={field} placeholder="Server (e.g. Exness-MT5Real8)" value={server} onChange={(e) => setServer(e.target.value)} />
-      <div className="grid grid-cols-2 gap-1 rounded-lg border border-line bg-panel2 p-1">
-        {(["mt5", "mt4"] as const).map((p) => (
-          <button
-            type="button"
-            key={p}
-            onClick={() => setPlatform(p)}
-            className={`rounded-md py-1.5 font-mono text-[10px] uppercase ${
-              platform === p ? "bg-amber font-semibold text-ink" : "text-muted"
-            }`}
-          >
-            {p}
-          </button>
-        ))}
-      </div>
-      {error && (
-        <p className="rounded-md border border-down/30 bg-down/10 px-3 py-2 font-mono text-[10px] text-down">
-          {error}
-        </p>
-      )}
-      <button
-        type="submit"
-        disabled={busy}
-        className="h-9 w-full rounded-lg bg-amber font-mono text-[11px] font-semibold text-ink transition active:scale-[0.98] disabled:opacity-50"
-      >
-        {busy ? "Linking…" : "Link account"}
-      </button>
-    </form>
+      {ping && <div className="mt-1 break-all font-mono text-[10px] text-up">{ping}</div>}
+    </div>
   );
 }
 
@@ -449,9 +352,10 @@ function BridgeLinkForm({ onDone }: { onDone: () => void }) {
   return (
     <form onSubmit={submit} className="mb-2 space-y-2 rounded-lg border border-line bg-panel p-3">
       <p className="font-mono text-[10px] leading-relaxed text-muted">
-        Connect a real MT5 account through your own bridge service instead of MetaAPI. Run it next
-        to a real MT5 terminal on your own machine — see tilly-trading/mt5-bridge/README.md — then
-        paste its HTTPS URL and API key below. We verify it live before saving.
+        Every account connects through its own self-hosted MT5 bridge — a small service you (or
+        your client) run next to a real MT5 terminal on your own machine. See
+        tilly-trading/mt5-bridge/README.md for setup, then paste the bridge&apos;s HTTPS URL and
+        API key below. We verify it live before saving.
       </p>
       <div className="grid grid-cols-2 gap-2">
         <select value={broker} onChange={(e) => setBroker(e.target.value)} className={field}>
