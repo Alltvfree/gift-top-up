@@ -11,6 +11,18 @@ live against a real Exness demo account: health/account/price/symbols,
 positions, and market + limit order placement all confirmed working
 end-to-end through a GRID bot.
 
+Every route serializes through a single `_mt5_lock` (see below) — found
+live, the hard way: running a GRID bot (limit orders + frequent position
+polls) alongside a DCA bot (market orders) on one account, GRID kept
+succeeding every tick while DCA's market order failed every single time,
+with a raw connection-level 502 from Cloudflare rather than this file's
+own JSON error path — consistent with two request threads calling into
+MetaTrader5's IPC channel at the same moment, since that package isn't
+documented as safe for concurrent access. The lock fix is written and
+reasoned through carefully but not yet re-verified live against that
+same two-bots-at-once scenario — confirm it actually resolves this
+before trusting it with more bots per account.
+
 The Tilly backend (wherever it runs — Render or anywhere else) calls this
 service over plain HTTPS instead of talking to MT5 directly. That's the
 whole point: MT5 has no official retail REST API, and this is the one
@@ -36,7 +48,9 @@ service example so it survives reboots.
 from __future__ import annotations
 
 import os
+import threading
 import time
+from functools import wraps
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
@@ -65,6 +79,27 @@ DEVIATION_POINTS = 20  # max acceptable slippage for market orders
 MAGIC = 20260101  # arbitrary order tag identifying Tilly-placed orders
 
 app = FastAPI(title="Tilly MT5 Bridge")
+
+# MetaTrader5's IPC channel to the terminal isn't documented as safe for
+# concurrent calls from multiple threads. FastAPI runs these sync routes in
+# a thread pool, so two bots ticking in the same engine cycle can otherwise
+# call into mt5.* at the same moment. Found the hard way: with a GRID bot
+# (limit orders + frequent position polls) and a DCA bot (market orders)
+# both running on one account, GRID kept working every tick while DCA's
+# market order failed every time — not with our own JSON error, but with a
+# raw connection-level 502 from Cloudflare, meaning the request never got a
+# clean response at all. Consistent with a race inside the shared IPC
+# channel, not a network issue. Every route below serializes through this.
+_mt5_lock = threading.Lock()
+
+
+def _serialized(fn):
+    @wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        with _mt5_lock:
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 
 def _init_mt5() -> None:
@@ -171,6 +206,7 @@ class LimitOrderIn(BaseModel):
 
 # ---------------------------------------------------------------- routes ---
 @app.get("/health", dependencies=[Depends(require_api_key)])
+@_serialized
 def health() -> dict:
     # Requires the API key too — this service is reachable from the open
     # internet (via whatever tunnel exposes it), and even "just health" would
@@ -180,6 +216,7 @@ def health() -> dict:
 
 
 @app.get("/account", dependencies=[Depends(require_api_key)])
+@_serialized
 def account() -> dict:
     info = mt5.account_info()
     if info is None:
@@ -188,6 +225,7 @@ def account() -> dict:
 
 
 @app.get("/price/{symbol}", dependencies=[Depends(require_api_key)])
+@_serialized
 def price(symbol: str) -> dict:
     _ensure_symbol(symbol)
     tick = mt5.symbol_info_tick(symbol)
@@ -197,6 +235,7 @@ def price(symbol: str) -> dict:
 
 
 @app.get("/symbols", dependencies=[Depends(require_api_key)])
+@_serialized
 def symbols() -> list[str]:
     """Every symbol this account's terminal knows about, by its exact broker
     name — lets the frontend offer a real picker instead of the user
@@ -206,6 +245,7 @@ def symbols() -> list[str]:
 
 
 @app.get("/positions", dependencies=[Depends(require_api_key)])
+@_serialized
 def positions(magic: int | None = None) -> list[dict]:
     """`magic`, when given, scopes results to that bot's own positions —
     several Tilly bots can share one MT5 account/symbol, and without this
@@ -231,6 +271,7 @@ def positions(magic: int | None = None) -> list[dict]:
 
 
 @app.get("/candles/{symbol}", dependencies=[Depends(require_api_key)])
+@_serialized
 def candles(symbol: str, timeframe: str = "1m", limit: int = 200) -> dict:
     """Real historical OHLC bars from the terminal — mt5.copy_rates_from_pos,
     the official history API. Returns oldest-first, matching the shape the
@@ -256,6 +297,7 @@ def candles(symbol: str, timeframe: str = "1m", limit: int = 200) -> dict:
 
 
 @app.get("/orders", dependencies=[Depends(require_api_key)])
+@_serialized
 def orders() -> list[dict]:
     rows = mt5.orders_get() or ()
     return [
@@ -271,6 +313,7 @@ def orders() -> list[dict]:
 
 
 @app.post("/orders/market", dependencies=[Depends(require_api_key)])
+@_serialized
 def place_market_order(body: MarketOrderIn) -> dict:
     _ensure_symbol(body.symbol)
     _ensure_tradable(body.symbol)
@@ -298,6 +341,7 @@ def place_market_order(body: MarketOrderIn) -> dict:
 
 
 @app.post("/orders/limit", dependencies=[Depends(require_api_key)])
+@_serialized
 def place_limit_order(body: LimitOrderIn) -> dict:
     _ensure_symbol(body.symbol)
     _ensure_tradable(body.symbol)
@@ -320,6 +364,7 @@ def place_limit_order(body: LimitOrderIn) -> dict:
 
 
 @app.post("/positions/{position_id}/close", dependencies=[Depends(require_api_key)])
+@_serialized
 def close_position(position_id: str) -> dict:
     ticket = int(position_id)
     pos = next((p for p in (mt5.positions_get(ticket=ticket) or ()) if p.ticket == ticket), None)
@@ -348,6 +393,7 @@ def close_position(position_id: str) -> dict:
 
 
 @app.post("/orders/{order_id}/cancel", dependencies=[Depends(require_api_key)])
+@_serialized
 def cancel_order(order_id: str) -> dict:
     request = {"action": mt5.TRADE_ACTION_REMOVE, "order": int(order_id)}
     result = mt5.order_send(request)
