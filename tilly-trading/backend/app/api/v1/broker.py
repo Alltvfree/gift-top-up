@@ -8,6 +8,7 @@ provisioning and is never written to the database.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from sqlalchemy import select
@@ -16,7 +17,9 @@ from app.broker.mt5_bridge_client import MT5BridgeClient, MT5BridgeError
 from app.broker.registry import build_broker_for_account
 from app.core.deps import DbSession
 from app.core.supabase_auth import SupabaseUserId
+from app.db.models.bot import Bot
 from app.db.models.broker_account import BrokerAccount
+from app.db.models.position import Position
 from app.db.session import async_session_factory
 from app.schemas.broker import BridgeLinkRequest, BrokerAccountOut, BrokerLinkRequest
 from app.services.broker_service import provision_account
@@ -259,6 +262,53 @@ async def account_symbols(account_id: uuid.UUID, user_id: SupabaseUserId, db: Db
             pass
 
     return {"symbols": symbols}
+
+
+@router.post("/positions/{position_id}/close")
+async def close_position(position_id: uuid.UUID, user_id: SupabaseUserId, db: DbSession) -> dict:
+    """Manually close one open position — the safety valve that was missing
+    when GRID positions had no way to close at all (fixed separately in
+    grid_bot.py, but a manual close button should exist regardless)."""
+    position = await db.get(Position, position_id)
+    if position is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Position not found.")
+
+    bot = await db.get(Bot, position.bot_id)
+    if bot is None or bot.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Position not found.")
+    if position.closed_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Position already closed.")
+    if not bot.broker_account_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bot has no broker account.")
+
+    account = await db.get(BrokerAccount, bot.broker_account_id)
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Broker account not found.")
+
+    try:
+        broker = build_broker_for_account(account)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    try:
+        await broker.connect()
+        await broker.close_position(position.broker_position_id or "")
+    except Exception as exc:  # noqa: BLE001 - broker/bridge failure
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    finally:
+        try:
+            await broker.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Reflect the close immediately rather than waiting for the next engine
+    # tick to reconcile it — realized_pnl is the last-known unrealized figure,
+    # same same-tick-approximation caveat as the engine's own sync (see
+    # services/engine.py::_sync_positions).
+    position.closed_at = datetime.now(timezone.utc)
+    position.realized_pnl = position.unrealized_pnl
+    await db.commit()
+    return {"ok": True}
 
 
 @router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)

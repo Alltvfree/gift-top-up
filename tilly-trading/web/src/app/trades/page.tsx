@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConsoleShell, SectionTitle } from "@/components/console-shell";
 import { PriceChart } from "@/components/price-chart";
 import { TradeJournal } from "@/components/trade-journal";
+import { closePosition } from "@/lib/broker-api";
 import { fetchBrokerAccounts, fetchClosedPositions, fetchPositions } from "@/lib/db";
 import type { PositionRow } from "@/lib/supabase";
 
@@ -23,6 +24,7 @@ function Trades() {
   const [loading, setLoading] = useState(true);
   const [chartSymbol, setChartSymbol] = useState<string | null>(null);
   const [liveAccountId, setLiveAccountId] = useState<string | null>(null);
+  const [closingId, setClosingId] = useState<string | null>(null);
 
   const chartSymbols = useMemo(() => {
     const fromPositions = Array.from(new Set(positions.map((p) => p.symbol)));
@@ -31,21 +33,22 @@ function Trades() {
   }, [positions]);
   const activeSymbol = chartSymbol ?? chartSymbols[0] ?? DEFAULT_SYMBOLS[0];
 
+  const refresh = useCallback((silent: boolean) => {
+    return Promise.all([fetchPositions(), fetchClosedPositions()]).then(([open, closed]) => {
+      setPositions(open);
+      setClosedCount(closed.length);
+      if (!silent) setLoading(false);
+    });
+  }, []);
+
   useEffect(() => {
     let active = true;
-    const refresh = (silent: boolean) => {
-      Promise.all([fetchPositions(), fetchClosedPositions()])
-        .then(([open, closed]) => {
-          if (!active) return;
-          setPositions(open);
-          setClosedCount(closed.length);
-        })
-        .finally(() => {
-          if (active && !silent) setLoading(false);
-        });
-    };
-    refresh(false);
-    const t = setInterval(() => refresh(true), 5000);
+    refresh(false).catch(() => {
+      if (active) setLoading(false);
+    });
+    const t = setInterval(() => {
+      if (active) refresh(true).catch(() => {});
+    }, 5000);
 
     // A connected self-hosted MT5 bridge account, if any, feeds the price
     // chart real history (see web/src/lib/live-prices.ts). One-off fetch —
@@ -66,7 +69,22 @@ function Trades() {
       active = false;
       clearInterval(t);
     };
-  }, []);
+  }, [refresh]);
+
+  async function closeOne(p: PositionRow) {
+    if (!window.confirm(`Close ${p.symbol} ${p.side} ${p.volume} now at market?`)) {
+      return;
+    }
+    setClosingId(p.id);
+    try {
+      await closePosition(p.id);
+      await refresh(true);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to close position.");
+    } finally {
+      setClosingId(null);
+    }
+  }
 
   const openPnl = positions.reduce((a, p) => a + Number(p.unrealized_pnl ?? 0), 0);
 
@@ -143,6 +161,15 @@ function Trades() {
                 <div className="mt-2 flex items-center justify-between font-mono text-[10px] text-muted">
                   <span>ENTRY {p.open_price}</span>
                   <span>MKT {p.current_price ?? "—"}</span>
+                </div>
+                <div className="mt-2 flex justify-end">
+                  <button
+                    disabled={closingId === p.id}
+                    onClick={() => closeOne(p)}
+                    className="h-7 rounded-lg border border-down/30 bg-down/10 px-3 font-mono text-[10px] font-semibold text-down transition active:scale-[0.98] disabled:opacity-50"
+                  >
+                    {closingId === p.id ? "CLOSING…" : "CLOSE"}
+                  </button>
                 </div>
               </div>
             ))}

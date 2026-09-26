@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ConsoleShell, SectionTitle } from "@/components/console-shell";
+import { closePosition } from "@/lib/broker-api";
 import { deleteBot, fetchBots, fetchPositions, setBotStatus } from "@/lib/db";
 import type { BotRow, PositionRow } from "@/lib/supabase";
 
@@ -20,6 +21,7 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [closingId, setClosingId] = useState<string | null>(null);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -69,6 +71,21 @@ function Dashboard() {
       alert(e instanceof Error ? e.message : "Failed to delete bot.");
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function closeOne(p: PositionRow) {
+    if (!window.confirm(`Close ${p.symbol} ${p.side} ${p.volume} now at market?`)) {
+      return;
+    }
+    setClosingId(p.id);
+    try {
+      await closePosition(p.id);
+      await load();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to close position.");
+    } finally {
+      setClosingId(null);
     }
   }
 
@@ -196,6 +213,15 @@ function Dashboard() {
                     {Number(p.unrealized_pnl) >= 0 ? "+" : "−"}$
                     {Math.abs(Number(p.unrealized_pnl))}
                   </span>
+                </div>
+                <div className="mt-2 flex justify-end">
+                  <button
+                    disabled={closingId === p.id}
+                    onClick={() => closeOne(p)}
+                    className="h-7 rounded-lg border border-down/30 bg-down/10 px-3 font-mono text-[10px] font-semibold text-down transition active:scale-[0.98] disabled:opacity-50"
+                  >
+                    {closingId === p.id ? "CLOSING…" : "CLOSE"}
+                  </button>
                 </div>
               </div>
             ))}
