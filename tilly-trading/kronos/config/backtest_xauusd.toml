@@ -7,7 +7,6 @@ timeframe = "M5"
 higher_timeframe = "H1"
 initial_balance = 10000
 currency = "USD"
-side = "BUY"
 random_seed = 42
 
 [walk_forward]
@@ -18,10 +17,14 @@ step_days = 14
 embargo_minutes = 60
 
 [signal]
+# Two INDEPENDENT thresholds for two independently-trained models — see the
+# same note in config/backtest.toml.
 buy_threshold = 0.60
-sell_threshold = 0.40
+sell_threshold = 0.60
 cooldown_bars = 3
 max_positions = 1
+trade_buy = true
+trade_sell = true
 
 [risk]
 mode = "percent_equity"

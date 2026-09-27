@@ -36,3 +36,9 @@ def test_generate_report_writes_all_expected_files(tmp_path):
     html = (latest / "report.html").read_text()
     assert "Leakage Audit" in html
     assert "Executive Summary" in html
+    assert "BUY model" in html and "SELL model" in html
+
+    import pandas as pd
+
+    predictions = pd.read_csv(out_dir / "predictions.csv")
+    assert {"predicted_probability_buy", "predicted_probability_sell"}.issubset(predictions.columns)

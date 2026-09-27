@@ -38,11 +38,13 @@ def test_run_walk_forward_end_to_end_on_synthetic_data():
     assert len(result.windows) >= 1
     run_windows = [w for w in result.windows if not w.skipped_reason]
     assert run_windows, f"every window was skipped: {[w.skipped_reason for w in result.windows]}"
-    assert "auc" in result.overall_model_metrics
+    assert "auc" in result.overall_model_metrics_buy
+    assert "auc" in result.overall_model_metrics_sell
     assert "total_trades" in result.overall_trading_metrics
     assert isinstance(result.all_trades, pd.DataFrame)
     assert isinstance(result.equity_curve, pd.DataFrame)
     assert not result.predictions.empty
+    assert {"predicted_probability_buy", "predicted_probability_sell"}.issubset(result.predictions.columns)
 
 
 def test_windows_are_trained_independently_not_concatenated_before_scoring():

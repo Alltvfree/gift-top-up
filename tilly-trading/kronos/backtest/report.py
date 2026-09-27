@@ -91,7 +91,8 @@ def generate_report(
             "validation_start": w.window.val_start, "validation_end": w.window.val_end,
             "test_start": w.window.test_start, "test_end": w.window.test_end,
             "samples": w.test_rows, "trades": w.trading_metrics.get("total_trades", 0),
-            "auc": w.model_metrics.get("auc"), "accuracy": w.model_metrics.get("accuracy"),
+            "auc_buy": w.model_metrics_buy.get("auc"), "accuracy_buy": w.model_metrics_buy.get("accuracy"),
+            "auc_sell": w.model_metrics_sell.get("auc"), "accuracy_sell": w.model_metrics_sell.get("accuracy"),
             "win_rate": w.trading_metrics.get("win_rate"),
             "profit_factor": w.trading_metrics.get("profit_factor"),
             "net_profit": w.trading_metrics.get("net_profit"),
@@ -112,16 +113,24 @@ def generate_report(
         "lightgbm_params": lgb_params,
         "feature_columns": feature_columns,
         "target_definition": (
-            f"P(TP-before-SL): entered {cfg.side} at close, TP={cfg.take_profit.value} "
-            f"({cfg.take_profit.type}), SL={cfg.stop_loss.value} ({cfg.stop_loss.type}), "
-            f"resolved within {cfg.execution.max_holding_bars} bars — see labels.label_tp_before_sl."
+            f"Two independent models per window (see backtest/walk_forward.py): "
+            f"BUY model predicts P(a BUY entered at close hits TP before SL); "
+            f"SELL model predicts the same for a SELL entry. "
+            f"TP={cfg.take_profit.value} ({cfg.take_profit.type}), SL={cfg.stop_loss.value} "
+            f"({cfg.stop_loss.type}), resolved within {cfg.execution.max_holding_bars} bars — "
+            f"see labels.label_tp_before_sl. Neither side's probability is inferred from the "
+            f"other's (see signal_engine.py's module docstring for why that matters)."
         ),
         "symbol_spec": spec.__dict__,
     }
     (out_dir / "config.json").write_text(json.dumps(meta, indent=2, default=str))
     (out_dir / "metrics.json").write_text(
         json.dumps(
-            {"overall_model_metrics": result.overall_model_metrics, "overall_trading_metrics": result.overall_trading_metrics},
+            {
+                "overall_model_metrics_buy": result.overall_model_metrics_buy,
+                "overall_model_metrics_sell": result.overall_model_metrics_sell,
+                "overall_trading_metrics": result.overall_trading_metrics,
+            },
             indent=2, default=str,
         )
     )
@@ -167,7 +176,8 @@ def _render_html(
     warnings: list[str], meta: dict, wf_rows: list[dict],
 ) -> str:
     tm = result.overall_trading_metrics
-    mm = result.overall_model_metrics
+    mm_buy = result.overall_model_metrics_buy
+    mm_sell = result.overall_model_metrics_sell
     verdict = (
         "MODEL DOES NOT CURRENTLY SHOW POSITIVE RISK-ADJUSTED EXPECTANCY"
         if tm.get("net_profit", 0) <= 0 or tm.get("total_trades", 0) == 0
@@ -208,7 +218,8 @@ img {{ max-width: 100%; border: 1px solid #eee; margin: 0.5rem 0; }}
 <div class="section"><h2>1. Executive Summary</h2>
 <div class="verdict">{verdict}</div>
 {_dict_table({k: tm.get(k) for k in ("total_trades","win_rate","net_profit","net_profit_percent","max_drawdown_percent","profit_factor","sharpe_ratio")})}
-{_dict_table({k: mm.get(k) for k in ("auc","accuracy") if mm})}
+{_dict_table({f"buy_{k}": mm_buy.get(k) for k in ("auc","accuracy")}) if mm_buy else ""}
+{_dict_table({f"sell_{k}": mm_sell.get(k) for k in ("auc","accuracy")}) if mm_sell else ""}
 </div>
 
 <div class="section"><h2>2. Configuration</h2>{_dict_table(meta['config'])}</div>
@@ -217,7 +228,12 @@ img {{ max-width: 100%; border: 1px solid #eee; margin: 0.5rem 0; }}
 
 <div class="section"><h2>4. Walk-Forward Configuration</h2>{_dict_table(meta['config'].get('walk_forward', {}))}</div>
 
-<div class="section"><h2>5. Model Metrics (overall, out-of-sample)</h2>{_dict_table(mm)}</div>
+<div class="section"><h2>5. Model Metrics (overall, out-of-sample)</h2>
+<h3>BUY model — P(BUY entry hits TP before SL)</h3>{_dict_table(mm_buy)}
+<h3>SELL model — P(SELL entry hits TP before SL)</h3>{_dict_table(mm_sell)}
+<p><em>Two independent models, each evaluated only against its own labeled outcome — a SELL trade's
+probability never comes from "1 minus the BUY model." See target_definition in config.json.</em></p>
+</div>
 
 <div class="section"><h2>6. Trading Metrics (overall)</h2>{_dict_table(tm)}</div>
 

@@ -30,10 +30,20 @@ class WalkForwardConfig:
 
 @dataclass
 class SignalConfig:
+    # buy_threshold/sell_threshold are each an independent bar a SEPARATE
+    # model's own probability must clear — NOT complementary halves of one
+    # probability. buy_threshold=0.60 means "the BUY-side model itself is
+    # >=60% confident"; sell_threshold=0.60 means the SAME of the SELL-side
+    # model. A live BTCUSDm run caught the bug in the older, single-model
+    # convention (sell_threshold as 1-buy_threshold on one BUY-only
+    # probability): 641 of 643 trades came out SELL, none of them ever
+    # validated by an actual SELL-trained model. See signal_engine.py.
     buy_threshold: float = 0.60
-    sell_threshold: float = 0.40
+    sell_threshold: float = 0.60
     cooldown_bars: int = 3
     max_positions: int = 1
+    trade_buy: bool = True
+    trade_sell: bool = True
 
 
 @dataclass
@@ -104,7 +114,6 @@ class BacktestConfig:
     higher_timeframe: str | None = "H1"
     initial_balance: float = 10_000.0
     currency: str = "USD"
-    side: str = "BUY"  # which label direction the model was/will be trained for
     random_seed: int = 42
 
     walk_forward: WalkForwardConfig = field(default_factory=WalkForwardConfig)

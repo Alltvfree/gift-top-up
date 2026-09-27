@@ -1,12 +1,24 @@
 """Kronos live inference loop.
 
-Loads a model trained by train.py, and every `poll_seconds` pulls the most
-recent bars, computes the same features used in training, predicts
-P(TP-before-SL), and publishes a BUY/SELL/NO_TRADE signal to Supabase.
+Loads TWO models trained by train.py — one trained with --side BUY, one
+with --side SELL — and every `poll_seconds` pulls the most recent bars,
+computes the same features used in training, predicts each model's own
+P(TP-before-SL) for its own direction, and publishes a BUY/SELL/NO_TRADE
+signal to Supabase.
 
-If the model was trained with --higher-timeframe, pass the matching
+Two models, not one: an earlier version of this file used a single
+BUY-trained model and treated "P(BUY) is low" as a SELL signal
+(SELL_THRESHOLD = 1 - BUY_THRESHOLD). A real walk-forward backtest against
+BTCUSDm caught why that's wrong — it produced 641 SELL trades out of 643,
+none of them ever validated by an actual SELL-trained model, because "the
+market probably won't let a BUY win" is not the same claim as "a SELL will
+win." See backtest/signal_engine.py's module docstring for the full story.
+Train both directions with train.py (--side BUY and --side SELL, same
+symbol/timeframe/TP/SL, two separate --out files) before running this.
+
+If the models were trained with --higher-timeframe, pass the matching
 --higher-timeframe here too — the feature set has to line up exactly with
-what the model was trained on, or predict() will fail on a missing column
+what they were trained on, or predict() will fail on a missing column
 (a loud, immediate error, not a silent misprediction).
 
 Run this continuously — same always-on pattern as
@@ -26,21 +38,22 @@ from mt5_data import connect, disconnect, download_history
 from publish_signal import publish_signal
 from train import feature_columns_for
 
-# From the project notes' example decision rule: BUY only when
-# P(TP-before-SL) > 0.60. Symmetric on the sell side. Between the two
-# thresholds the model isn't confident enough in either direction, which is
-# NO_TRADE — an intentional output, not a fallback for missing data.
+# Each threshold applies to its OWN model's own probability — not a
+# complementary pair on one probability. See this file's module docstring.
 BUY_THRESHOLD = 0.60
-SELL_THRESHOLD = 1 - BUY_THRESHOLD
+SELL_THRESHOLD = 0.60
 
 
 def latest_signal(
-    model: lgb.Booster,
+    model_buy: lgb.Booster,
+    model_sell: lgb.Booster,
     symbol: str,
     timeframe: str,
     lookback_bars: int,
     higher_timeframe: str | None = None,
     higher_lookback_bars: int = 300,
+    buy_threshold: float = BUY_THRESHOLD,
+    sell_threshold: float = SELL_THRESHOLD,
 ) -> dict:
     raw = download_history(symbol, timeframe, lookback_bars)
     feats = compute_features(raw)
@@ -59,12 +72,20 @@ def latest_signal(
         )
 
     latest = feats.iloc[[-1]]
-    p_tp = float(model.predict(latest[feature_columns])[0])
+    p_buy = float(model_buy.predict(latest[feature_columns])[0])
+    p_sell = float(model_sell.predict(latest[feature_columns])[0])
 
-    if p_tp >= BUY_THRESHOLD:
-        side, confidence = "BUY", p_tp * 100
-    elif p_tp <= SELL_THRESHOLD:
-        side, confidence = "SELL", (1 - p_tp) * 100
+    buy_signal = p_buy >= buy_threshold
+    sell_signal = p_sell >= sell_threshold
+    if buy_signal and sell_signal:
+        # Both models independently confident, in opposite directions — a
+        # genuine conflict, not a tie to break. Sit out, same as
+        # backtest/signal_engine.py's decide_side().
+        side, confidence = "NO_TRADE", 50.0
+    elif buy_signal:
+        side, confidence = "BUY", p_buy * 100
+    elif sell_signal:
+        side, confidence = "SELL", p_sell * 100
     else:
         side, confidence = "NO_TRADE", 50.0
 
@@ -73,26 +94,31 @@ def latest_signal(
         "side": side,
         "confidence": round(confidence, 1),
         "timeframe": timeframe,
-        "note": f"P(TP-before-SL)={p_tp:.3f}",
+        "note": f"P(BUY TP-before-SL)={p_buy:.3f} P(SELL TP-before-SL)={p_sell:.3f}",
     }
 
 
 def run_loop(
-    model_path: str,
+    model_buy_path: str,
+    model_sell_path: str,
     symbol: str,
     timeframe: str,
     lookback_bars: int,
     poll_seconds: int,
     higher_timeframe: str | None = None,
     higher_lookback_bars: int = 300,
+    buy_threshold: float = BUY_THRESHOLD,
+    sell_threshold: float = SELL_THRESHOLD,
 ) -> None:
-    model = lgb.Booster(model_file=model_path)
+    model_buy = lgb.Booster(model_file=model_buy_path)
+    model_sell = lgb.Booster(model_file=model_sell_path)
     connect()
     try:
         while True:
             try:
                 signal = latest_signal(
-                    model, symbol, timeframe, lookback_bars, higher_timeframe, higher_lookback_bars
+                    model_buy, model_sell, symbol, timeframe, lookback_bars,
+                    higher_timeframe, higher_lookback_bars, buy_threshold, sell_threshold,
                 )
                 publish_signal(**signal)
                 print(f"Published: {signal}")
@@ -107,13 +133,14 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", default="kronos_model.txt")
+    parser.add_argument("--model-buy", default="kronos_model_buy.txt", help="Model trained with train.py --side BUY.")
+    parser.add_argument("--model-sell", default="kronos_model_sell.txt", help="Model trained with train.py --side SELL.")
     parser.add_argument("--symbol", default="XAUUSDm")
     parser.add_argument("--timeframe", default="M5")
     parser.add_argument(
         "--higher-timeframe",
         default=None,
-        help="Must match whatever --higher-timeframe train.py used for this model, or omit if it used none.",
+        help="Must match whatever --higher-timeframe train.py used for both models, or omit if it used none.",
     )
     parser.add_argument(
         "--lookback-bars",
@@ -127,16 +154,21 @@ def main() -> None:
         default=300,
         help="Same idea as --lookback-bars, for the higher timeframe (only used if --higher-timeframe is set).",
     )
+    parser.add_argument("--buy-threshold", type=float, default=BUY_THRESHOLD)
+    parser.add_argument("--sell-threshold", type=float, default=SELL_THRESHOLD)
     parser.add_argument("--poll-seconds", type=int, default=60)
     args = parser.parse_args()
     run_loop(
-        args.model,
+        args.model_buy,
+        args.model_sell,
         args.symbol,
         args.timeframe,
         args.lookback_bars,
         args.poll_seconds,
         args.higher_timeframe,
         args.higher_lookback_bars,
+        args.buy_threshold,
+        args.sell_threshold,
     )
 
 

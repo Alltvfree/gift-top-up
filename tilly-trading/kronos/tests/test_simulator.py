@@ -25,7 +25,7 @@ def _zero_cost_cfg(**overrides) -> BacktestConfig:
         slippage=SlippageConfig(mode="fixed_points", points=0.0),
         commission=CommissionConfig(type="per_lot", value=0.0),
         risk=RiskConfig(mode="fixed_lot", fixed_lot=1.0),
-        signal=SignalConfig(buy_threshold=0.6, sell_threshold=0.4, cooldown_bars=0),
+        signal=SignalConfig(buy_threshold=0.6, sell_threshold=0.6, cooldown_bars=0),
         execution=ExecutionConfig(next_bar=True, same_bar_exit_policy="conservative", max_holding_bars=10),
     )
     for k, v in overrides.items():
@@ -33,16 +33,19 @@ def _zero_cost_cfg(**overrides) -> BacktestConfig:
     return cfg
 
 
-def _bars(prices: dict, n: int, probability_at_0=np.nan) -> pd.DataFrame:
+def _bars(prices: dict, n: int, buy_probability_at_0=np.nan, sell_probability_at_0=np.nan) -> pd.DataFrame:
     times = pd.date_range("2024-01-01", periods=n, freq="5min", tz="UTC")
-    prob = np.full(n, np.nan)
-    prob[0] = probability_at_0
+    prob_buy = np.full(n, np.nan)
+    prob_sell = np.full(n, np.nan)
+    prob_buy[0] = buy_probability_at_0
+    prob_sell[0] = sell_probability_at_0
     return pd.DataFrame(
         {
             "time": times,
             "open": prices["open"], "high": prices["high"], "low": prices["low"], "close": prices["close"],
             "spread": np.zeros(n),
-            "predicted_probability": prob,
+            "predicted_probability_buy": prob_buy,
+            "predicted_probability_sell": prob_sell,
         }
     )
 
@@ -51,7 +54,7 @@ def test_buy_hits_tp_on_the_entry_bar_itself():
     df = _bars(
         {"open": [100, 100, 103, 103, 103], "high": [100, 104, 103, 103, 103],
          "low": [100, 99.5, 103, 103, 103], "close": [100, 103, 103, 103, 103]},
-        5, probability_at_0=0.9,
+        5, buy_probability_at_0=0.9, sell_probability_at_0=0.0,
     )
     account = Account(10000.0)
     trades = run_simulation(df, _zero_cost_cfg(), spec, account, window_index=0)
@@ -69,7 +72,7 @@ def test_sell_hits_sl():
     df = _bars(
         {"open": [100, 100, 100, 100, 100], "high": [100, 103, 100, 100, 100],
          "low": [100, 99, 100, 100, 100], "close": [100, 101, 100, 100, 100]},
-        5, probability_at_0=0.1,
+        5, buy_probability_at_0=0.0, sell_probability_at_0=0.9,
     )
     account = Account(10000.0)
     trades = run_simulation(df, _zero_cost_cfg(), spec, account, window_index=0)
@@ -82,11 +85,25 @@ def test_sell_hits_sl():
     assert account.balance == pytest.approx(9800.0)
 
 
+def test_low_buy_probability_alone_never_opens_a_sell():
+    """The exact bug a live BTCUSDm run caught: a low BUY probability must
+    NOT be enough to open a SELL — the SELL model's own probability must
+    independently clear its own threshold."""
+    df = _bars(
+        {"open": [100, 100, 100, 100, 100], "high": [100, 103, 100, 100, 100],
+         "low": [100, 99, 100, 100, 100], "close": [100, 101, 100, 100, 100]},
+        5, buy_probability_at_0=0.05, sell_probability_at_0=0.10,  # BUY unlikely, but SELL was never confident either
+    )
+    account = Account(10000.0)
+    trades = run_simulation(df, _zero_cost_cfg(), spec, account, window_index=0)
+    assert trades == []
+
+
 def test_same_bar_tp_and_sl_conservative_default_assumes_sl():
     df = _bars(
         {"open": [100, 100, 103, 103, 103], "high": [100, 104, 103, 103, 103],
          "low": [100, 97, 103, 103, 103], "close": [100, 100, 103, 103, 103]},
-        5, probability_at_0=0.9,
+        5, buy_probability_at_0=0.9, sell_probability_at_0=0.0,
     )
     account = Account(10000.0)
     trades = run_simulation(df, _zero_cost_cfg(), spec, account, window_index=0)
@@ -98,12 +115,12 @@ def test_same_bar_tp_and_sl_optimistic_policy_assumes_tp():
     df = _bars(
         {"open": [100, 100, 103, 103, 103], "high": [100, 104, 103, 103, 103],
          "low": [100, 97, 103, 103, 103], "close": [100, 100, 103, 103, 103]},
-        5, probability_at_0=0.9,
+        5, buy_probability_at_0=0.9, sell_probability_at_0=0.0,
     )
     cfg = _zero_cost_cfg()
     cfg.execution.same_bar_exit_policy = "optimistic"
     account = Account(10000.0)
-    trades = run_simulation(df, cfg, spec, account, window_index=0, )
+    trades = run_simulation(df, cfg, spec, account, window_index=0)
     assert trades[0].exit_reason == "TP"
     assert trades[0].exit_price == pytest.approx(103.0)
 
@@ -112,7 +129,7 @@ def test_time_exit_when_neither_tp_nor_sl_hit_within_horizon():
     n = 8
     df = _bars(
         {"open": [100.0] * n, "high": [100.2] * n, "low": [99.8] * n, "close": [100.0] * n},
-        n, probability_at_0=0.9,
+        n, buy_probability_at_0=0.9, sell_probability_at_0=0.0,
     )
     cfg = _zero_cost_cfg()
     cfg.execution.max_holding_bars = 3
@@ -126,7 +143,7 @@ def test_end_of_test_when_data_runs_out_before_horizon():
     n = 4  # shorter than max_holding_bars
     df = _bars(
         {"open": [100.0] * n, "high": [100.2] * n, "low": [99.8] * n, "close": [100.0] * n},
-        n, probability_at_0=0.9,
+        n, buy_probability_at_0=0.9, sell_probability_at_0=0.0,
     )
     cfg = _zero_cost_cfg()
     cfg.execution.max_holding_bars = 20
@@ -138,14 +155,18 @@ def test_end_of_test_when_data_runs_out_before_horizon():
 
 def test_cooldown_blocks_immediate_reentry():
     n = 10
-    prob = np.full(n, np.nan)
-    prob[0] = 0.9  # BUY signal, entry at bar1, immediately hits TP at bar1
-    prob[2] = 0.9  # another BUY signal right after the first trade closes at bar1
+    prob_buy = np.full(n, np.nan)
+    prob_sell = np.full(n, np.nan)
+    prob_buy[0] = 0.9  # BUY signal, entry at bar1, immediately hits TP at bar1
+    prob_buy[2] = 0.9  # another BUY signal right after the first trade closes at bar1
+    prob_sell[0] = 0.0
+    prob_sell[2] = 0.0
     df = pd.DataFrame(
         {
             "time": pd.date_range("2024-01-01", periods=n, freq="5min", tz="UTC"),
             "open": [100] * n, "high": [104] * n, "low": [99.5] * n, "close": [103] * n,
-            "spread": [0] * n, "predicted_probability": prob,
+            "spread": [0] * n,
+            "predicted_probability_buy": prob_buy, "predicted_probability_sell": prob_sell,
         }
     )
     cfg = _zero_cost_cfg()
@@ -159,7 +180,7 @@ def test_position_sizing_skip_opens_no_trade_and_does_not_hang():
     n = 5
     df = _bars(
         {"open": [100] * n, "high": [104] * n, "low": [99.5] * n, "close": [103] * n},
-        n, probability_at_0=0.9,
+        n, buy_probability_at_0=0.9, sell_probability_at_0=0.0,
     )
     cfg = _zero_cost_cfg(risk=RiskConfig(mode="fixed_money", fixed_money=0.0001))
     account = Account(10000.0)
@@ -171,7 +192,7 @@ def test_spread_slippage_and_commission_all_reduce_net_pnl():
     df = _bars(
         {"open": [100, 100, 103, 103, 103], "high": [100, 104, 103, 103, 103],
          "low": [100, 99.5, 103, 103, 103], "close": [100, 103, 103, 103, 103]},
-        5, probability_at_0=0.9,
+        5, buy_probability_at_0=0.9, sell_probability_at_0=0.0,
     )
     zero_cost = run_simulation(df, _zero_cost_cfg(), spec, Account(10000.0), window_index=0)[0]
 
@@ -196,7 +217,7 @@ def test_signal_bar_own_future_ohlc_does_not_change_the_entry_price():
     df_a = _bars(
         {"open": [100, 105, 105, 105, 105], "high": [100, 106, 105, 105, 105],
          "low": [100, 104, 105, 105, 105], "close": [100, 105, 105, 105, 105]},
-        n, probability_at_0=0.9,
+        n, buy_probability_at_0=0.9, sell_probability_at_0=0.0,
     )
     df_b = df_a.copy()
     df_b.loc[0, ["high", "low"]] = [999.0, -999.0]  # bar0's own range changed; must not affect entry

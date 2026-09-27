@@ -95,11 +95,17 @@ def run_simulation(
 ) -> list[Trade]:
     """test_df must be sorted by time and carry columns: time, open, high,
     low, close, spread (MT5's own recorded spread column, in points — used
-    only if cfg.spread.mode == "historical"), predicted_probability.
-    Mutates `account` in place (realized balance + a mark-to-market point
-    per bar) and returns the list of closed trades.
+    only if cfg.spread.mode == "historical"), predicted_probability_buy,
+    predicted_probability_sell — two independent probabilities, one per
+    side's own trained model (see signal_engine.py's module docstring for
+    why this must NOT be a single probability with a complementary
+    threshold). Mutates `account` in place (realized balance + a
+    mark-to-market point per bar) and returns the list of closed trades.
     """
-    required = {"time", "open", "high", "low", "close", "predicted_probability"}
+    required = {
+        "time", "open", "high", "low", "close",
+        "predicted_probability_buy", "predicted_probability_sell",
+    }
     missing = required - set(test_df.columns)
     if missing:
         raise ValueError(f"test_df is missing required columns: {missing}")
@@ -116,16 +122,17 @@ def run_simulation(
     cooldown_until = -1
     while i < n:
         bar = rows.iloc[i]
-        prob = bar["predicted_probability"]
+        prob_buy, prob_sell = bar["predicted_probability_buy"], bar["predicted_probability_sell"]
 
         opened = False
-        if i > cooldown_until and pd.notna(prob):
-            side = decide_side(float(prob), cfg.signal)
+        if i > cooldown_until and pd.notna(prob_buy) and pd.notna(prob_sell):
+            side = decide_side(float(prob_buy), float(prob_sell), cfg.signal)
             if side != "NO_TRADE":
+                probability = float(prob_buy) if side == "BUY" else float(prob_sell)
                 entry_idx = i + 1 if cfg.execution.next_bar else i
                 if entry_idx < n:
                     opened = _open_and_scan(
-                        rows, entry_idx, side, float(prob), bar["time"],
+                        rows, entry_idx, side, probability, bar["time"],
                         cfg, spec, account, rng, tp_distance, sl_distance,
                         window_index, trades,
                     )

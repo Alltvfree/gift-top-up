@@ -125,7 +125,8 @@ if (-not (Test-Path $terminalExe)) {
     throw "Copy succeeded but terminal64.exe is missing at $terminalExe — check $MasterTerminalDir."
 }
 
-$modelPath = Join-Path $KronosDir "kronos_model.txt"
+$modelBuyPath = Join-Path $KronosDir "kronos_model_buy.txt"
+$modelSellPath = Join-Path $KronosDir "kronos_model_sell.txt"
 
 # A small PS1 launcher, not a plain .env file — same reasoning as
 # mt5-bridge's launchers: the Scheduled Task action invokes this directly,
@@ -140,7 +141,7 @@ $launcherContent = @"
 `$env:SUPABASE_URL = "$SupabaseUrl"
 `$env:SUPABASE_SERVICE_ROLE_KEY = "$SupabaseServiceRoleKey"
 Set-Location "$KronosDir"
-& "$pythonExe" infer.py --model "$modelPath" --symbol "$Symbol" --timeframe "$Timeframe" --poll-seconds $PollSeconds
+& "$pythonExe" infer.py --model-buy "$modelBuyPath" --model-sell "$modelSellPath" --symbol "$Symbol" --timeframe "$Timeframe" --poll-seconds $PollSeconds
 "@
 Set-Content -Path $launcherPath -Value $launcherContent -Encoding UTF8
 Write-Host "Wrote launcher: $launcherPath"
@@ -153,13 +154,17 @@ Write-Host "Registered Scheduled Task '$TaskName' (not started yet — see step 
 
 Write-Host ""
 Write-Host "== Next steps (do these yourself, in order) ==" -ForegroundColor Cyan
-Write-Host "1. Train a model first — a one-off, interactive step, not run by this script:"
+Write-Host "1. Train BOTH a BUY model and a SELL model first — a one-off, interactive step,"
+Write-Host "   not run by this script. Two separate trained models, not one model whose"
+Write-Host "   complement stands in for the other side (see infer.py's module docstring"
+Write-Host "   for why that broke a real backtest)."
 Write-Host "   cd `"$KronosDir`""
 Write-Host "   `$env:MT5_LOGIN=`"$Mt5Login`"; `$env:MT5_PASSWORD=`"$Mt5Password`"; `$env:MT5_SERVER=`"$Mt5Server`"; `$env:MT5_PATH=`"$terminalExe`""
-Write-Host "   & `"$pythonExe`" train.py --symbol $Symbol --timeframe $Timeframe --bars 50000 --side BUY --tp 3.0 --sl 2.0 --out `"$modelPath`""
-Write-Host "   Read the printed test AUC/accuracy before trusting it with anything."
+Write-Host "   & `"$pythonExe`" train.py --symbol $Symbol --timeframe $Timeframe --bars 50000 --side BUY --tp 3.0 --sl 2.0 --out `"$modelBuyPath`""
+Write-Host "   & `"$pythonExe`" train.py --symbol $Symbol --timeframe $Timeframe --bars 50000 --side SELL --tp 3.0 --sl 2.0 --out `"$modelSellPath`""
+Write-Host "   Read each printed test AUC/accuracy before trusting either one with anything."
 Write-Host ""
-Write-Host "2. Once $modelPath exists, start live inference:"
+Write-Host "2. Once both $modelBuyPath and $modelSellPath exist, start live inference:"
 Write-Host "   Start-ScheduledTask -TaskName `"$TaskName`""
 Write-Host ""
 Write-Host "3. Same rule as every other Scheduled Task on this VPS: disconnect your RDP"

@@ -11,7 +11,6 @@ timeframe = "M5"
 higher_timeframe = "H1"
 initial_balance = 10000
 currency = "USD"
-side = "BUY"
 random_seed = 42
 
 [walk_forward]
@@ -22,10 +21,17 @@ step_days = 14
 embargo_minutes = 60
 
 [signal]
+# Two INDEPENDENT thresholds for two independently-trained models (one per
+# side — see backtest/walk_forward.py) — sell_threshold is NOT "1 minus
+# buy_threshold" on a single probability. A live BTCUSDm run caught the bug
+# in that older convention: it produced 641 SELL trades out of 643, none of
+# them validated by an actual SELL-trained model.
 buy_threshold = 0.60
-sell_threshold = 0.40
+sell_threshold = 0.60
 cooldown_bars = 3
 max_positions = 1
+trade_buy = true
+trade_sell = true
 
 [risk]
 mode = "percent_equity"

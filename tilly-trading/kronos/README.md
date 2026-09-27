@@ -115,10 +115,14 @@ understand what `add-kronos.ps1` automates:
 
 1. Install MetaTrader 5 and log in to your broker account (demo first).
 2. `pip install -r requirements.txt`
-3. Train: `python train.py --symbol XAUUSDm --timeframe M5 --bars 50000 --side BUY --tp 3.0 --sl 2.0 --out kronos_model.txt`
+3. Train BOTH sides — two separate models, not one model whose complement
+   stands in for the other direction (see infer.py's module docstring for
+   why that broke a real backtest):
+   `python train.py --symbol XAUUSDm --timeframe M5 --bars 50000 --side BUY --tp 3.0 --sl 2.0 --out kronos_model_buy.txt`
+   `python train.py --symbol XAUUSDm --timeframe M5 --bars 50000 --side SELL --tp 3.0 --sl 2.0 --out kronos_model_sell.txt`
    — chunked download avoids the notes' "Invalid params" 100k-bar bug.
 4. Set credentials: `$env:SUPABASE_URL = "..."`, `$env:SUPABASE_SERVICE_ROLE_KEY = "..."`.
-5. Run inference: `python infer.py --model kronos_model.txt --symbol XAUUSDm --timeframe M5 --poll-seconds 60`
+5. Run inference: `python infer.py --model-buy kronos_model_buy.txt --model-sell kronos_model_sell.txt --symbol XAUUSDm --timeframe M5 --poll-seconds 60`
    — keep it running the same way as `bridge.py` (Task Scheduler,
    `-LogonType Interactive`; MT5's IPC only works inside a real desktop
    session).
@@ -146,8 +150,8 @@ mt5_data.py -> backtest/__main__.py (CLI)
               backtest/windows.py       (rolls [train][embargo][val][embargo][test] forward)
                     |
                     v
-              backtest/walk_forward.py  (per window: train.prepare_dataset + train.train_model,
-                    |                    frozen model predicts only that window's own test rows)
+              backtest/walk_forward.py  (per window: trains a BUY model AND a SELL model,
+                    |                    each frozen and predicting only that window's own test rows)
                     v
               backtest/simulator.py     (next-bar entry, bid/ask spread+slippage, TP/SL,
                     |                    same-bar-both-hit policy, cooldown, position sizing)
@@ -180,6 +184,35 @@ the spread again. If both TP and SL are reachable within the same bar
 (OHLC only, no tick data), `same_bar_exit_policy: conservative` (the
 default) assumes the stop-loss happened first.
 
+**Two independent models, not one model's complement** — a real BTCUSDm
+`--full` run against live MT5 history caught this the hard way. The first
+working version of this backtester trained a single BUY-side model and
+treated a low BUY probability as a SELL signal (`sell_threshold` as
+`1 - buy_threshold` on one probability — inherited from `infer.py`'s
+original live-inference convention). Result: 643 trades, 641 of them SELL,
+net -$2,414 (-24%) on $10,000, 44% max drawdown. The overall AUC (0.542)
+looked like a normal weak-but-real edge, which made it easy to miss that
+almost the entire result was actually testing an assumption — "the market
+probably won't let a BUY win" — that had never itself been trained or
+validated, since a SELL trade's real outcome depends on different TP/SL
+price levels entirely. Per-window, one bad regime (AUC 0.516, the weakest
+of four windows) produced 251 of the 643 trades and accounted for nearly
+all of the loss; the other three windows roughly netted to breakeven.
+
+Fixed by training two separate models per window — `label_tp_before_sl`
+already supported `side="BUY"`/`side="SELL"` as two distinct targets, just
+never both at once — sharing one feature computation (features don't
+depend on side, only the label does) but with fully independent
+train/validate/freeze/predict cycles and independent thresholds
+(`signal.buy_threshold` / `signal.sell_threshold`, both default 0.60 now,
+each gating its own model — see `backtest/signal_engine.py`'s module
+docstring). `infer.py` (live inference) got the same fix: it now loads
+`--model-buy` and `--model-sell` and predicts both, rather than one model
+standing in for both directions. The report's Model Metrics section shows
+each side's AUC/accuracy/confusion matrix separately for exactly this
+reason — a single blended number would hide precisely the kind of
+imbalance that caused this.
+
 **Leakage audit**: every backtest run re-verifies, independently of
 `features.merge_higher_timeframe`'s own (already-fixed) logic, that no
 attached higher-timeframe bar could see information from before it
@@ -207,17 +240,21 @@ default — `spread.mode: historical`). All three are additive, not
 architectural, follow-ups.
 
 **Tested against synthetic data** (`kronos/tests/`, run with `pytest` from
-inside `kronos/`): 75 tests covering every module — no-lookahead checks on
+inside `kronos/`): 86 tests covering every module — no-lookahead checks on
 `features.py`/`train.py` (now actually committed here, not just run ad hoc
 during development), hand-constructed price paths with known TP/SL
 outcomes through the realistic execution simulator (spread/slippage/
 commission math, same-bar policy, cooldown, position sizing, time exits,
-end-of-test handling), the walk-forward window generator's chronological
-non-overlap guarantees, the leakage-audit regression test above, and a
-full end-to-end walk-forward run producing a real HTML report. Like every
-other file in this project, `backtest/__main__.py`'s actual MT5 download
-step has not been run against a live terminal — confirm the first real
-`--quick` run's numbers before trusting a `--full` one.
+end-of-test handling), a dedicated check that a low BUY probability alone
+never opens a SELL (the exact bug above), the walk-forward window
+generator's chronological non-overlap guarantees, the leakage-audit
+regression test above, and a full end-to-end walk-forward run producing a
+real HTML report. Like every other file in this project,
+`backtest/__main__.py`'s actual MT5 download step has not been run against
+a live terminal in this repo's own CI — it has, however, now been run for
+real against live BTCUSDm history on the project's own VPS (see the
+BUY/SELL story above) — confirm each new symbol/config combination's first
+`--quick` run before trusting a `--full` one.
 
 ## What's not built yet (see the notes' own phased roadmap)
 
