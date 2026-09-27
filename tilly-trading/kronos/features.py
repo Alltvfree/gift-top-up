@@ -13,6 +13,8 @@ that's allowed to look forward, because a label needs to know the outcome.
 """
 from __future__ import annotations
 
+from collections import deque
+
 import numpy as np
 import pandas as pd
 
@@ -60,6 +62,99 @@ def _bollinger_width(close: pd.Series, period: int = 20, num_std: float = 2.0) -
     std = close.rolling(period, min_periods=period).std()
     width = (2 * num_std * std) / mid.replace(0, np.nan)
     return width.fillna(0.0)
+
+
+# How many bars must pass on both sides of a high/low before it counts as
+# a confirmed swing point. A swing at position i needs bars [i-k, i+k] to
+# know it was the local extreme — the most recent k bars can never be
+# confirmed yet, which is correct, not a bug: you genuinely can't know a
+# bar was a swing high until enough time has passed without a higher one.
+SWING_LAG = 5
+
+# Only the most recent N confirmed swing highs/lows are tracked as
+# potential support/resistance — old levels lose relevance, and bounding
+# this keeps the per-bar scan cheap (O(N) instead of O(bars)) even over
+# 50,000+ bars of training history.
+MAX_TRACKED_LEVELS = 20
+
+
+def _support_resistance(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.DataFrame:
+    """Distance to the nearest confirmed swing-high (resistance, above
+    price) and swing-low (support, below price), plus whether price has
+    broken beyond every recently confirmed level in either direction.
+
+    Lookahead-safe by construction: at bar t, only swings at position
+    i <= t - SWING_LAG are used, since a swing at i needs bars up to i+k to
+    be confirmed at all. This is the one thing in this file most tempting
+    to get wrong — a naive centered rolling-window swing detector (used
+    without this confirmation-lag bookkeeping) would silently leak future
+    bars into a "live" feature.
+    """
+    n = len(close)
+    h = high.to_numpy()
+    l = low.to_numpy()
+    c = close.to_numpy()
+
+    is_swing_high = np.zeros(n, dtype=bool)
+    is_swing_low = np.zeros(n, dtype=bool)
+    for i in range(SWING_LAG, n - SWING_LAG):
+        # Strict dominance over every OTHER bar in the window, not just
+        # tying the window max: a flat/tied stretch (real markets do have
+        # these — thin liquidity, or repeated prints) would otherwise let
+        # every bar in it claim to be a "swing high" against itself.
+        others_h = np.delete(h[i - SWING_LAG : i + SWING_LAG + 1], SWING_LAG)
+        others_l = np.delete(l[i - SWING_LAG : i + SWING_LAG + 1], SWING_LAG)
+        if h[i] > others_h.max():
+            is_swing_high[i] = True
+        if l[i] < others_l.min():
+            is_swing_low[i] = True
+
+    dist_to_resistance_pct = np.full(n, np.nan)
+    dist_to_support_pct = np.full(n, np.nan)
+    broke_resistance = np.zeros(n, dtype=int)
+    broke_support = np.zeros(n, dtype=int)
+
+    confirmed_highs: deque[float] = deque(maxlen=MAX_TRACKED_LEVELS)
+    confirmed_lows: deque[float] = deque(maxlen=MAX_TRACKED_LEVELS)
+    confirmed_up_to = -1  # last position whose swing status is knowable as of the current bar
+
+    for t in range(n):
+        newly_confirmable = t - SWING_LAG
+        while confirmed_up_to < newly_confirmable and confirmed_up_to + 1 < n:
+            confirmed_up_to += 1
+            i = confirmed_up_to
+            if is_swing_high[i]:
+                confirmed_highs.append(h[i])
+            if is_swing_low[i]:
+                confirmed_lows.append(l[i])
+
+        above = [p for p in confirmed_highs if p > c[t]]
+        below = [p for p in confirmed_lows if p < c[t]]
+        if above:
+            dist_to_resistance_pct[t] = (min(above) - c[t]) / c[t]
+        elif confirmed_highs:
+            # Broke through every tracked level — 0.0 is a real, meaningful
+            # value here ("at or beyond the ceiling"), not "unknown". Left
+            # as NaN this would silently drop every breakout row wherever
+            # callers do dropna(subset=FEATURE_COLUMNS) for the warmup
+            # period — exactly the rows a breakout feature exists to catch.
+            dist_to_resistance_pct[t] = 0.0
+            broke_resistance[t] = 1
+        if below:
+            dist_to_support_pct[t] = (c[t] - max(below)) / c[t]
+        elif confirmed_lows:
+            dist_to_support_pct[t] = 0.0
+            broke_support[t] = 1
+
+    return pd.DataFrame(
+        {
+            "dist_to_resistance_pct": dist_to_resistance_pct,
+            "dist_to_support_pct": dist_to_support_pct,
+            "broke_resistance": broke_resistance,
+            "broke_support": broke_support,
+        },
+        index=close.index,
+    )
 
 
 def _adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
@@ -115,11 +210,16 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     out["rolling_std_20"] = close.pct_change().rolling(20, min_periods=20).std()
     out["adx_14"] = _adx(high, low, close, 14)
 
-    # Market structure — simple higher-high / lower-low flags, one bar at a
-    # time (not the centered rolling-window swing detector some libraries
-    # use, since a centered window peeks at future bars).
+    # Market structure — simple bar-to-bar higher-high / lower-low flags,
+    # plus real support/resistance levels from confirmed swing points
+    # (_support_resistance handles its own no-lookahead bookkeeping).
     out["higher_high"] = (high > high.shift(1)).astype(int)
     out["lower_low"] = (low < low.shift(1)).astype(int)
+    sr = _support_resistance(high, low, close)
+    out["dist_to_resistance_pct"] = sr["dist_to_resistance_pct"]
+    out["dist_to_support_pct"] = sr["dist_to_support_pct"]
+    out["broke_resistance"] = sr["broke_resistance"]
+    out["broke_support"] = sr["broke_support"]
 
     # Candle structure
     body = (close - open_).abs()
@@ -163,6 +263,7 @@ FEATURE_COLUMNS = [
     "rsi_14", "macd", "macd_signal", "macd_hist", "stoch_14", "roc_10",
     "atr_pct", "bb_width_20", "candle_range_pct", "rolling_std_20", "adx_14",
     "higher_high", "lower_low",
+    "dist_to_resistance_pct", "dist_to_support_pct", "broke_resistance", "broke_support",
     "body_pct_of_range", "upper_wick_pct", "lower_wick_pct", "bullish_candle",
     "hour", "day_of_week", "session_asian", "session_london", "session_new_york",
 ]
