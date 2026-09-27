@@ -4,7 +4,23 @@ import {
   type BrokerAccountRow,
   type PositionRow,
   type PresetRow,
+  type SignalRow,
 } from "@/lib/supabase";
+
+/**
+ * Latest forecasts published by an external model (Kronos, or any future
+ * source — see `source` on each row) via tilly-trading/kronos/publish_signal.py.
+ * Shared/market-wide data, not scoped to the signed-in user.
+ */
+export async function fetchSignals(limit = 50): Promise<SignalRow[]> {
+  const { data, error } = await supabase
+    .from("signals")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as SignalRow[];
+}
 
 export async function fetchBots(): Promise<BotRow[]> {
   const { data, error } = await supabase

@@ -55,6 +55,20 @@ export interface PositionRow {
   closed_at: string | null;
 }
 
+export interface SignalRow {
+  id: string;
+  symbol: string;
+  side: "BUY" | "SELL" | "NO_TRADE";
+  confidence: number;
+  timeframe: string;
+  tp: number | null;
+  sl: number | null;
+  expected_move: number | null;
+  note: string | null;
+  source: string;
+  created_at: string;
+}
+
 export interface BrokerAccountRow {
   id: string;
   broker_name: string;

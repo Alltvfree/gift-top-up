@@ -1,0 +1,451 @@
+FOREX LOCAL AI MODEL — KRONOS NOTES
+====================================
+
+Project:
+Kronos — Local AI trading system for MetaTrader 5 / Forex / XAUUSD.
+
+GOAL
+----
+Build a small, fast local AI model that can analyze MT5 market data and generate
+BUY / SELL / NO-TRADE signals for automated trading.
+
+RECOMMENDED LOCAL AI MODEL
+--------------------------
+Primary recommendation: LightGBM.
+
+Why:
+- Very fast on CPU
+- Low RAM requirements
+- Does not require a GPU
+- Excellent for tabular/time-series feature data
+- Easy to train and retrain
+- Suitable for running continuously on a small server
+- Works well with technical indicators and engineered market features
+
+Other models considered:
+1. LightGBM — primary model
+2. XGBoost — alternative / ensemble model
+3. CatBoost — alternative model
+4. LSTM/GRU — optional later experiment
+5. Transformer/time-series models — optional advanced experiment
+6. Small local LLM — not recommended as the primary price-direction model
+
+RECOMMENDED HARDWARE
+--------------------
+Small local server:
+- CPU: 4–8 physical cores
+- RAM: 8–16 GB
+- GPU: not required
+- Storage: 20–100+ GB depending on historical MT5 data
+
+A GPU can be added later if experimenting with LSTM/Transformer models.
+
+CURRENT MT5 SETUP
+-----------------
+Broker symbol used in the existing experiment:
+XAUUSDm
+
+Existing environment:
+- Windows
+- Python virtual environment
+- MetaTrader 5
+- LightGBM
+- Python 3.13 was used
+- Existing training script: train_xauusd.py
+- Later script: train_xauusd_v3-1.py
+
+Existing successful test:
+- Symbol: XAUUSDm
+- Timeframe: M5
+- Bars requested: 50,000
+- Prediction bars: 3
+- Trade threshold: 0.55
+- Training rows: 34,983
+- Test rows: 14,993
+- Positive target rate:
+  Train: 50.53%
+  Test: 49.80%
+
+IMPORTANT:
+The v3-1 script later produced:
+"No data returned for XAUUSDm: (-2, 'Terminal: Invalid params')"
+when requesting 100,000 bars. This needs to be handled in the data-download layer rather than assuming 100,000 bars are always available in one MT5 request.
+
+PROPOSED KRONOS ARCHITECTURE
+----------------------------
+
+MT5 XAUUSDm
+    |
+    v
+M1 / M5 / M15 / H1 market data
+    |
+    v
+Feature Engine
+    |
+    +-- RSI
+    +-- EMA
+    +-- ATR
+    +-- MACD
+    +-- Bollinger Bands
+    +-- ADX
+    +-- Candle structure
+    +-- Volatility
+    +-- Market regime
+    +-- Trading session
+    +-- Higher-timeframe trend
+    |
+    v
+AI Models
+    |
+    +-- Direction model
+    +-- Movement model
+    +-- Trade-quality model
+    |
+    v
+Risk Engine
+    |
+    v
+MT5 Execution
+
+THREE-MODEL APPROACH
+--------------------
+
+MODEL 1 — DIRECTION
+Predict:
+- P(UP)
+- P(DOWN)
+
+MODEL 2 — EXPECTED MOVEMENT
+Predict:
+- Expected price movement / return
+- Potential movement size
+
+MODEL 3 — TRADE QUALITY
+Predict:
+- Probability that TP is reached before SL
+
+Example decision:
+
+BUY only when:
+- P(UP) > 0.60
+- TP probability > 0.60
+- Market regime is suitable
+- Risk conditions are acceptable
+
+SELL uses the equivalent downside conditions.
+
+NO-TRADE is an important output.
+The AI should NOT be forced to trade every candle.
+
+BETTER TARGET DESIGN
+--------------------
+
+Instead of only asking:
+
+"Will the next 3 candles go up or down?"
+
+Use a trading-outcome target.
+
+Example:
+
+Entry = current candle
+
+TP = +$3
+SL = -$2
+
+Label:
+1 = TP reached before SL
+0 = SL reached before TP
+
+The model then learns:
+
+"What is the probability that this trade reaches TP before SL?"
+
+This is closer to the actual decision Kronos needs to make.
+
+FEATURE ENGINE
+---------------
+
+Potential features:
+
+PRICE:
+- Open
+- High
+- Low
+- Close
+- Tick volume
+- Spread, if available
+
+TREND:
+- EMA 9
+- EMA 20
+- EMA 50
+- EMA 100
+- EMA 200
+- EMA slopes
+- Price distance from EMA
+
+MOMENTUM:
+- RSI
+- MACD
+- Stochastic
+- Rate of Change
+
+VOLATILITY:
+- ATR
+- ATR percentage
+- Bollinger Band width
+- Recent candle range
+- Rolling standard deviation
+
+MARKET STRUCTURE:
+- Higher highs
+- Lower highs
+- Higher lows
+- Lower lows
+- Recent swing highs/lows
+- Breakout conditions
+
+TIME:
+- Hour
+- Day of week
+- Trading session
+- London session
+- New York session
+- Asian session
+
+MULTI-TIMEFRAME:
+- M1
+- M5
+- M15
+- H1
+- Potentially H4
+
+The model should preferably use normalized/relative values rather than raw
+prices where appropriate so the system is less dependent on the absolute
+XAUUSD price level.
+
+TRAINING DESIGN
+---------------
+
+Avoid random train/test splitting for time-series trading data.
+
+Preferred approach:
+
+Historical data
+    |
+    v
+Chronological training period
+    |
+    v
+Validation period
+    |
+    v
+Test period
+    |
+    v
+Walk-forward testing
+
+Example:
+
+2024 -> training
+2025 -> validation
+2026 -> out-of-sample test
+
+Then use rolling/walk-forward windows.
+
+Avoid data leakage:
+- Never use future candles as features.
+- Indicators must only use information available at the entry time.
+- TP/SL labels may look into the future only when creating training labels.
+- Do not allow future information into model features.
+
+BACKTESTING
+-----------
+
+The backtester should simulate:
+
+- Entry
+- Spread
+- Commission
+- Slippage
+- TP
+- SL
+- Position size
+- Maximum simultaneous positions
+- Trading sessions
+- Daily loss limit
+- Drawdown
+- Account balance
+- Equity
+- Margin
+- Risk per trade
+
+Important metrics:
+
+- Net profit
+- Profit factor
+- Win rate
+- Average win
+- Average loss
+- Maximum drawdown
+- Sharpe ratio
+- Sortino ratio
+- Number of trades
+- Expectancy
+- Consecutive losses
+- Monthly performance
+
+Do not evaluate the AI only by classification accuracy.
+
+A model can have good classification accuracy and still lose money after
+spread, slippage, commissions and bad risk management.
+
+RISK ENGINE
+-----------
+
+AI should NOT directly control unlimited trading risk.
+
+Recommended structure:
+
+AI signal
+    |
+    v
+Risk engine
+    |
+    +-- Maximum risk per trade
+    +-- Maximum daily loss
+    +-- Maximum open trades
+    +-- Maximum drawdown
+    +-- Spread filter
+    +-- Volatility filter
+    +-- News/session filter
+    |
+    v
+MT5 execution
+
+The risk engine should have authority to reject an AI signal.
+
+LIVE TRADING
+------------
+
+Live architecture:
+
+MT5
+ |
+ v
+Data Collector
+ |
+ v
+Feature Generator
+ |
+ v
+LightGBM inference
+ |
+ v
+Signal validation
+ |
+ v
+Risk engine
+ |
+ v
+Order manager
+ |
+ v
+MT5
+
+The live model should only use data that would have been available at the
+time of the decision.
+
+MODEL ENSEMBLE
+--------------
+
+Possible future setup:
+
+LightGBM
+   +
+XGBoost
+   +
+optional neural network
+   |
+   v
+Signal aggregator
+   |
+   v
+Kronos decision
+
+Example:
+
+LightGBM BUY probability = 0.68
+XGBoost BUY probability = 0.64
+Trade-quality probability = 0.71
+
+The final decision can require agreement between models.
+
+Do not add models just for complexity. Every additional model should improve
+out-of-sample performance after realistic trading costs.
+
+RECOMMENDED DEVELOPMENT ORDER
+-----------------------------
+
+PHASE 1
+- Fix reliable MT5 data downloader
+- Download XAUUSDm M5 data
+- Store historical data locally
+- Build feature pipeline
+
+PHASE 2
+- Build LightGBM direction model
+- Build TP-before-SL target
+- Perform chronological validation
+
+PHASE 3
+- Build realistic backtester
+- Include spread/slippage/commission
+- Measure drawdown and expectancy
+
+PHASE 4
+- Add market-regime features
+- Add multi-timeframe features
+- Add trade-quality model
+
+PHASE 5
+- Walk-forward testing
+- Paper trading
+- Live MT5 integration
+
+PHASE 6
+- Optional XGBoost ensemble
+- Optional LSTM/GRU experiment
+- Model monitoring and automatic retraining
+
+FINAL RECOMMENDATION
+--------------------
+
+For a small local Forex AI, use:
+
+Python
++ MetaTrader 5
++ LightGBM
++ pandas/numpy
++ technical feature engine
++ chronological/walk-forward validation
++ realistic backtester
++ independent risk engine
++ MT5 execution layer
+
+Do NOT start with a large LLM.
+
+For Kronos, the most useful AI is a fast tabular ML model trained specifically
+on market features and trading outcomes.
+
+Primary first version:
+LightGBM + XAUUSDm M5 + multi-timeframe features + TP-before-SL target +
+walk-forward backtesting + independent risk engine.
+
+IMPORTANT DISCLAIMER
+--------------------
+This architecture is for research/development. Forex and XAUUSD trading
+involve substantial risk. Backtest performance does not guarantee live
+performance. Live deployment should begin with paper/demo trading and strict
+risk limits.

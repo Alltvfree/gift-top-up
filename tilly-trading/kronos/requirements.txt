@@ -1,0 +1,10 @@
+# mt5_data.py is Windows only — MetaTrader5 talks to the terminal via
+# local IPC, no Linux/macOS build exists. features.py, labels.py, and
+# train.py's chronological split have no MT5 dependency and can be
+# developed/tested anywhere.
+MetaTrader5==5.0.6180
+lightgbm==4.7.0
+pandas==3.0.6
+numpy==2.4.6
+scikit-learn==1.9.1
+supabase==2.31.0
