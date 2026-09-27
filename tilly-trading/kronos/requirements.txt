@@ -8,11 +8,13 @@ pandas==3.0.6
 numpy==2.4.6
 scikit-learn==1.9.1
 supabase==2.31.0
-# backtest/ (Phase 3 - the realistic walk-forward backtester) only:
-PyYAML==6.0.2
-# No matplotlib: it has no prebuilt wheel yet for very new CPython releases
-# (confirmed against PyPI - even the latest matplotlib release ships no
-# cp314 wheel for any platform), and compiling it from source needs a C
-# compiler most VPSes don't have. backtest/charts.py instead renders its
-# three report charts as plain inline SVG - no extra dependency, no native
-# build step, works on whatever Python happens to be installed.
+# backtest/ (Phase 3 - the realistic walk-forward backtester) has NO extra
+# dependencies beyond what's already above. It intentionally avoids two
+# packages that would otherwise be the obvious choice:
+#  - PyYAML for config files: no prebuilt wheel yet for very new CPython
+#    releases (confirmed against PyPI - not even PyYAML's latest release
+#    ships a cp314 wheel for any platform), and no C compiler on the VPS to
+#    build one from source. backtest/config.py reads config/*.toml instead,
+#    via `tomllib` - standard library since Python 3.11, nothing to install.
+#  - matplotlib for report charts: same wheel problem. backtest/charts.py
+#    renders its three charts as plain inline SVG instead.

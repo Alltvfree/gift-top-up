@@ -1,16 +1,22 @@
 """Backtest configuration — everything the spec (see kronos/README.md's
 "Phase 3" section) says must not be hardcoded: walk-forward window sizes,
 signal thresholds, risk/position-sizing mode, spread/slippage/commission
-model, TP/SL, and execution convention. Loaded from YAML
-(config/backtest.yaml) with CLI flags able to override individual fields —
-see backtest/cli.py.
+model, TP/SL, and execution convention. Loaded from TOML
+(config/backtest.toml) with CLI flags able to override individual fields —
+see backtest/__main__.py.
+
+TOML, not YAML: `tomllib` is in the standard library from Python 3.11
+onward — nothing to `pip install`, ever, on any machine. PyYAML was tried
+first and failed the same way matplotlib did (see charts.py's docstring):
+no prebuilt wheel yet for a brand-new CPython release, and no C compiler on
+the VPS to build one from source. TOML still supports `#` comments, so the
+config files stay just as human-editable as the YAML they replaced.
 """
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
-
-import yaml
 
 
 @dataclass
@@ -126,14 +132,14 @@ _SECTION_TYPES = {
 
 
 def load_config(path: str | Path | None) -> BacktestConfig:
-    """Load a BacktestConfig from YAML. Missing sections/fields fall back to
+    """Load a BacktestConfig from TOML. Missing sections/fields fall back to
     the dataclass defaults above — a partial config file is valid, it just
     means "use the default for anything I didn't mention." No file at all
     (path=None) returns pure defaults, useful for --quick smoke runs."""
     raw: dict = {}
     if path is not None:
-        text = Path(path).read_text()
-        raw = yaml.safe_load(text) or {}
+        with open(path, "rb") as f:
+            raw = tomllib.load(f) or {}
 
     top_level = {k: v for k, v in raw.items() if k not in _SECTION_TYPES}
     cfg = BacktestConfig(**{k: v for k, v in top_level.items() if k in _field_names(BacktestConfig)})

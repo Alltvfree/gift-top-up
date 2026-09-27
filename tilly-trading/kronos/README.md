@@ -158,9 +158,9 @@ mt5_data.py -> backtest/__main__.py (CLI)
 Run it from inside `kronos/`:
 
 ```powershell
-python -m backtest --symbol BTCUSDm --config config/backtest.yaml --quick   # fast smoke test, ~6k bars
-python -m backtest --symbol BTCUSDm --config config/backtest.yaml --full    # full walk-forward, config's own window sizes
-python -m backtest --symbol XAUUSDm --config config/backtest_xauusd.yaml --full
+python -m backtest --symbol BTCUSDm --config config/backtest.toml --quick   # fast smoke test, ~6k bars
+python -m backtest --symbol BTCUSDm --config config/backtest.toml --full    # full walk-forward, config's own window sizes
+python -m backtest --symbol XAUUSDm --config config/backtest_xauusd.toml --full
 ```
 
 (Not `backtest.py` — a same-named script and package can't coexist cleanly

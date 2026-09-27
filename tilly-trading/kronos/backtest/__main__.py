@@ -1,8 +1,8 @@
 """CLI entrypoint (Phase 22). Run from inside kronos/:
 
-    python -m backtest --symbol BTCUSDm --config config/backtest.yaml --quick
-    python -m backtest --symbol BTCUSDm --config config/backtest.yaml --full
-    python -m backtest --symbol XAUUSDm --config config/backtest.yaml --full
+    python -m backtest --symbol BTCUSDm --config config/backtest.toml --quick
+    python -m backtest --symbol BTCUSDm --config config/backtest.toml --full
+    python -m backtest --symbol XAUUSDm --config config/backtest_xauusd.toml --full
 
 (Not `backtest.py` — a same-named script and package can't coexist cleanly
 in one directory, and this project already uses flat per-tool scripts
@@ -10,7 +10,7 @@ in one directory, and this project already uses flat per-tool scripts
 run a package as the entrypoint without a naming collision.)
 
 --quick forces a small, fast smoke-test shape (~5,000 bars, short
-walk-forward windows) regardless of what config/backtest.yaml says, for a
+walk-forward windows) regardless of what config/backtest.toml says, for a
 development sanity check. --full uses the config file's own walk-forward
 window sizes and downloads enough history to cover them.
 """
@@ -40,7 +40,7 @@ DEFAULT_LGB_PARAMS = {
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--symbol", default=None, help="Overrides the symbol in --config, if given.")
-    parser.add_argument("--config", default=None, help="Path to a backtest.yaml. Omit for pure defaults.")
+    parser.add_argument("--config", default=None, help="Path to a backtest.toml. Omit for pure defaults.")
     parser.add_argument("--higher-timeframe", default=None, help="Overrides the config's higher_timeframe.")
     parser.add_argument("--bars", type=int, default=None, help="Override the number of base-timeframe bars to download.")
     parser.add_argument("--out", default="reports")

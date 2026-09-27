@@ -1,0 +1,58 @@
+# Same shape as backtest.toml, scaled for XAUUSDm's price level (point=0.01,
+# but gold trades at ~$2-4k vs BTC's ~$80k+ — TP/SL in points must NOT be
+# copy-pasted between them, see kronos/README.md's TP/SL-scale-mismatch story).
+
+symbol = "XAUUSDm"
+timeframe = "M5"
+higher_timeframe = "H1"
+initial_balance = 10000
+currency = "USD"
+side = "BUY"
+random_seed = 42
+
+[walk_forward]
+train_days = 90
+validation_days = 14
+test_days = 14
+step_days = 14
+embargo_minutes = 60
+
+[signal]
+buy_threshold = 0.60
+sell_threshold = 0.40
+cooldown_bars = 3
+max_positions = 1
+
+[risk]
+mode = "percent_equity"
+risk_percent = 1.0
+fixed_money = 10.0
+fixed_lot = 0.01
+max_lot = 5.0
+
+[stop_loss]
+type = "points"
+value = 200   # 200 * 0.01 = $2, matching the README's SL=2.0 for XAUUSDm
+
+[take_profit]
+type = "points"
+value = 300   # 300 * 0.01 = $3, matching the README's TP=3.0 for XAUUSDm
+
+[spread]
+mode = "historical"
+points = 20
+percent = 0.02
+
+[slippage]
+mode = "fixed_points"
+points = 2.0
+random_std_points = 1.0
+
+[commission]
+type = "per_lot"
+value = 3.5
+
+[execution]
+next_bar = true
+same_bar_exit_policy = "conservative"
+max_holding_bars = 50
