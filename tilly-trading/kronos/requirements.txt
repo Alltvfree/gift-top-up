@@ -10,4 +10,9 @@ scikit-learn==1.9.1
 supabase==2.31.0
 # backtest/ (Phase 3 - the realistic walk-forward backtester) only:
 PyYAML==6.0.2
-matplotlib==3.10.0
+# No matplotlib: it has no prebuilt wheel yet for very new CPython releases
+# (confirmed against PyPI - even the latest matplotlib release ships no
+# cp314 wheel for any platform), and compiling it from source needs a C
+# compiler most VPSes don't have. backtest/charts.py instead renders its
+# three report charts as plain inline SVG - no extra dependency, no native
+# build step, works on whatever Python happens to be installed.

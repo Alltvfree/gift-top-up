@@ -126,9 +126,7 @@ def generate_report(
         )
     )
 
-    charts.equity_curve_chart(result.equity_curve, out_dir / "equity_curve.png")
-    charts.drawdown_chart(result.equity_curve, out_dir / "drawdown.png")
-    charts.trade_distribution_chart(result.all_trades, out_dir / "trade_distribution.png")
+    charts.write_charts(result.equity_curve, result.all_trades, out_dir)
 
     html = _render_html(result, cfg, spec, leakage_entries, data_quality_reports, warnings, meta, wf_rows)
     (out_dir / "report.html").write_text(html)
@@ -223,11 +221,11 @@ img {{ max-width: 100%; border: 1px solid #eee; margin: 0.5rem 0; }}
 
 <div class="section"><h2>6. Trading Metrics (overall)</h2>{_dict_table(tm)}</div>
 
-<div class="section"><h2>7. Equity Curve</h2><img src="equity_curve.png"></div>
+<div class="section"><h2>7. Equity Curve</h2><img src="equity_curve.svg"></div>
 
-<div class="section"><h2>8. Drawdown</h2><img src="drawdown.png"></div>
+<div class="section"><h2>8. Drawdown</h2><img src="drawdown.svg"></div>
 
-<div class="section"><h2>9. Trade Distribution</h2><img src="trade_distribution.png"></div>
+<div class="section"><h2>9. Trade Distribution</h2><img src="trade_distribution.svg"></div>
 
 <div class="section"><h2>10. Costs</h2>{_dict_table({k: tm.get(k) for k in ("total_commission","total_spread_cost","total_slippage_cost")})}</div>
 

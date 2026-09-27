@@ -25,7 +25,7 @@ def test_generate_report_writes_all_expected_files(tmp_path):
 
     expected = [
         "report.html", "trades.csv", "equity.csv", "predictions.csv", "walk_forward.csv",
-        "config.json", "metrics.json", "equity_curve.png", "drawdown.png", "trade_distribution.png",
+        "config.json", "metrics.json", "equity_curve.svg", "drawdown.svg", "trade_distribution.svg",
     ]
     for name in expected:
         assert (out_dir / name).exists(), f"missing {name}"
