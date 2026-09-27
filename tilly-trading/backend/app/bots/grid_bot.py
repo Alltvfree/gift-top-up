@@ -7,14 +7,14 @@ Parameters:
     - grid_levels: int      (e.g., 10)
     - lot_size: float       (e.g., 0.01)
     - take_profit_pips: float
-    - require_signal: bool  (optional, default False) — see _maybe_arm_ladder
+    - require_signal: bool       (optional, default False) — see _maybe_arm_ladder
+    - avoid_news_minutes: int    (optional, default off) — see _maybe_arm_ladder
 """
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bots.base import BaseBot
-from app.services.signal_gate import signal_allows
 
 
 class GridBot(BaseBot):
@@ -44,15 +44,15 @@ class GridBot(BaseBot):
         self.pending_orders: dict[str, dict] = {}
         self._armed = False
 
-        if not p.get("require_signal"):
-            # Default behavior, unchanged from before require_signal existed:
+        if not self.is_gated:
+            # Default behavior, unchanged from before any gate existed:
             # place the ladder immediately. A placement failure here surfaces
             # as bot.status='error' via engine.py's _start(), same as always.
             await self._arm_ladder(symbol, current_price)
             self._armed = True
-        # else: arming is deferred to on_tick(), gated on Kronos's latest
-        # signal — see _maybe_arm_ladder(). Not an error to start "idle";
-        # the bot just waits for a signal it agrees with.
+        # else: arming is deferred to on_tick(), re-checked against
+        # entry_allowed() every tick — see _maybe_arm_ladder(). Not an
+        # error to start "idle"; the bot just waits for its gate(s) to pass.
 
     async def _arm_ladder(self, symbol: str, current_price: float) -> None:
         """Place the symmetric ladder: buys below, sells above current price."""
@@ -78,15 +78,14 @@ class GridBot(BaseBot):
 
     async def _maybe_arm_ladder(self, symbol: str, bid: float, ask: float, session: AsyncSession) -> None:
         """GRID is non-directional (it places both BUY and SELL legs at
-        once), so the gate here isn't "does Kronos want BUY or SELL" —
-        it's "does Kronos think this symbol is worth trading right now at
-        all". side=None in signal_allows() means exactly that: NO_TRADE (or
-        no signal, or a stale one) blocks; either BUY or SELL unblocks.
-        Re-checked every tick until it passes, or the bot is stopped.
+        once), so the require_signal half of the gate here isn't "does
+        Kronos want BUY or SELL" — it's "does Kronos think this symbol is
+        worth trading right now at all". side=None in entry_allowed()
+        means exactly that: NO_TRADE (or no signal, or a stale one) blocks;
+        either BUY or SELL unblocks. Re-checked every tick until it passes,
+        or the bot is stopped.
         """
-        allowed, reason = await signal_allows(
-            session, symbol, side=None, max_age_minutes=self.params.get("signal_max_age_minutes", 30)
-        )
+        allowed, reason = await self.entry_allowed(symbol, side=None, session=session)
         if not allowed:
             return
         await self._arm_ladder(symbol, (bid + ask) / 2)
@@ -94,7 +93,7 @@ class GridBot(BaseBot):
 
     async def on_tick(self, symbol: str, bid: float, ask: float, session: AsyncSession) -> None:
         if not self._armed:
-            if self.params.get("require_signal"):
+            if self.is_gated:
                 await self._maybe_arm_ladder(symbol, bid, ask, session)
             if not self._armed:
                 return  # nothing placed yet — no positions to manage below

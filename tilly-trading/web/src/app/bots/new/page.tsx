@@ -36,6 +36,7 @@ function NewBot() {
   const [accountSymbols, setAccountSymbols] = useState<string[] | null>(null);
   const [symbolsLoading, setSymbolsLoading] = useState(false);
   const [requireSignal, setRequireSignal] = useState(false);
+  const [avoidNews, setAvoidNews] = useState(false);
 
   useEffect(() => {
     fetchBrokerAccounts().then((a) => {
@@ -94,11 +95,14 @@ function NewBot() {
     setBusy(true);
     setError(null);
     try {
+      const gateParams: Record<string, boolean | number> = {};
+      if (requireSignal) gateParams.require_signal = true;
+      if (avoidNews) gateParams.avoid_news_minutes = 30;
       await createBot({
         name: name.trim(),
         strategy,
         symbol,
-        parameters: requireSignal ? { ...(params ?? {}), require_signal: true } : (params ?? {}),
+        parameters: { ...(params ?? {}), ...gateParams },
         ai_preset_used: params ? preset : null,
         broker_account_id: accountId,
       });
@@ -234,6 +238,25 @@ function NewBot() {
               Wait for an external model&apos;s forecast (Signals page) to agree before opening
               positions in this symbol, instead of trading immediately. The bot sits idle — not
               in error — until a fresh, matching signal shows up.
+            </span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-2.5 rounded-lg border border-line bg-panel2 p-3">
+          <input
+            type="checkbox"
+            checked={avoidNews}
+            onChange={(e) => setAvoidNews(e.target.checked)}
+            className="mt-0.5 size-4 accent-amber"
+          />
+          <span>
+            <span className="block font-mono text-[11px] font-semibold text-fg">
+              Avoid high-impact news
+            </span>
+            <span className="mt-0.5 block text-[10px] text-muted">
+              Pause new entries for 30 minutes before and after a high-impact economic event
+              (FOMC, NFP, CPI) relevant to this symbol&apos;s currency. Can be combined with the
+              Kronos signal requirement above — both must pass to open a position.
             </span>
           </span>
         </label>

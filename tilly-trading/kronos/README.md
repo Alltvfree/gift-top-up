@@ -138,14 +138,54 @@ or backend or get committed anywhere.
   and is tested, but `train.py`/`infer.py` don't call it yet; they train on
   one timeframe's own indicators only.
 - ~~**Bot-side gating**~~ — done: a bot opts in with `require_signal: true`
-  in its parameters (a checkbox on the New Bot page), and only then checks
-  `app/services/signal_gate.py` before opening a position — GRID before
-  arming its ladder (side=None: any non-NO_TRADE signal unblocks, since
-  GRID trades both directions at once), DCA before each entry (side=BUY,
-  since it's directional). Every bot that doesn't set `require_signal`
-  behaves exactly as before this existed — verified with a regression test
-  proving the ungated path is untouched, plus tests for the gated wait/arm
-  behavior, against a real (in-memory) database, not mocks.
+  and/or `avoid_news_minutes: 30` in its parameters (checkboxes on the New
+  Bot page), and only then checks `BaseBot.entry_allowed()` before opening
+  a position — GRID before arming its ladder (side=None: any non-NO_TRADE
+  signal unblocks, since GRID trades both directions at once), DCA before
+  each entry (side=BUY, since it's directional). Both checks are
+  independent and additive — a bot can require a matching signal, avoid
+  high-impact news, both, or neither. Every bot that opts into neither
+  behaves exactly as before either gate existed — verified with a
+  regression test proving the ungated path is untouched, plus tests for
+  signal-only, news-only, and combined gating, against a real (in-memory)
+  database, not mocks.
+- **The `news_events` table has no automatic feed** —
+  `tilly-trading/supabase/migrations/0008_news_events.sql` and
+  `backend/app/services/news_filter.py` exist and are tested, but nothing
+  populates the table yet; rows go in manually (or via a future script)
+  using the service_role key. Wiring up a real economic-calendar API
+  (several exist, free and paid) is a deliberate follow-up requiring a
+  data-source decision, not something to guess at.
 - **The trade-quality / expected-movement models** from the notes'
   three-model architecture — this is the single TP-before-SL direction
   model only (Model 3 from the notes, doing double duty).
+- ~~**Real market structure**~~ — done: `features.py` now computes real
+  support/resistance levels from confirmed swing highs/lows (not lookahead
+  — a swing needs `SWING_LAG` bars on both sides before it counts, so the
+  most recent bars' swing status is genuinely unconfirmed, same as a human
+  reading a chart) and flags a breakout once price clears every recently
+  tracked level. This is a different thing from an LLM reading news
+  commentary and calling it "market structure" — see the LLM-narrative
+  discussion below.
+
+## On "reading the news like ChatGPT"
+
+Asked to make Kronos "read the news and check structure like ChatGPT
+does," worth being explicit about why that's not what got built. An
+example ChatGPT response shown as a reference point had a take-profit
+target *below* both the entry price and the stop-loss on a long position —
+an internally inconsistent number, because the response wasn't computed
+from real price data at all; it was ChatGPT summarizing what a couple of
+news/analysis sites already said, with citations, dressed in signal
+format. That's fundamentally different from what this file does: every
+number Kronos outputs is computed from real OHLC history it downloaded
+itself, by a model trained on actual trade outcomes with a test AUC you
+can check. It's exactly what the project notes (also written with
+ChatGPT's help) warned against: *"Do NOT start with a large LLM... the
+most useful AI is a fast tabular ML model trained specifically on market
+features and trading outcomes."*
+
+If an LLM-generated narrative signal source is wanted anyway, clearly
+labeled as unverified commentary and never a Kronos prediction, that's a
+separate, deliberate follow-up — not something to fold into this file
+silently.

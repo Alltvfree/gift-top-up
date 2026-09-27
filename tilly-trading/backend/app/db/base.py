@@ -37,6 +37,7 @@ from app.db.models import (  # noqa: E402,F401
     ai_preset,
     bot,
     broker_account,
+    news_event,
     order,
     position,
     signal,

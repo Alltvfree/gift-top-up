@@ -2,19 +2,19 @@
 
 Parameters:
     - symbol: str
-    - base_lot: float           (e.g., 0.01)
-    - multiplier: float         (e.g., 1.5)
-    - max_orders: int           (e.g., 6)
-    - deviation_pips: float     (e.g., 20)
+    - base_lot: float            (e.g., 0.01)
+    - multiplier: float          (e.g., 1.5)
+    - max_orders: int            (e.g., 6)
+    - deviation_pips: float      (e.g., 20)
     - take_profit_pips: float
-    - require_signal: bool      (optional, default False) — see _maybe_enter
+    - require_signal: bool       (optional, default False) — see _maybe_enter
+    - avoid_news_minutes: int    (optional, default off) — see _maybe_enter
 """
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bots.base import BaseBot
-from app.services.signal_gate import signal_allows
 
 
 class DCABot(BaseBot):
@@ -24,18 +24,18 @@ class DCABot(BaseBot):
         self.total_volume = 0.0
         self.order_count = 0
 
-        if not self.params.get("require_signal"):
-            # Default behavior, unchanged from before require_signal existed:
+        if not self.is_gated:
+            # Default behavior, unchanged from before any gate existed:
             # open the first position immediately. A placement failure here
             # surfaces as bot.status='error' via engine.py's _start(), same
             # as always.
             await self._enter_position()
-        # else: first entry deferred to on_tick(), gated on Kronos's latest
-        # signal — see _maybe_enter(). Not an error to start "idle"; the bot
-        # just waits for a signal it agrees with.
+        # else: first entry deferred to on_tick(), re-checked against
+        # entry_allowed() every tick — see _maybe_enter(). Not an error to
+        # start "idle"; the bot just waits for its gate(s) to pass.
 
     async def on_tick(self, symbol: str, bid: float, ask: float, session: AsyncSession) -> None:
-        gated = self.params.get("require_signal")
+        gated = self.is_gated
 
         if self.order_count == 0:
             # First entry never happened in initialize() because it's gated.
@@ -61,12 +61,11 @@ class DCABot(BaseBot):
         return
 
     async def _maybe_enter(self, symbol: str, session: AsyncSession) -> None:
-        """DCA only ever goes BUY (see _enter_position), so the gate is
-        directional: the latest signal must actually say BUY, not just
-        "not NO_TRADE". Re-checked every tick until it passes."""
-        allowed, reason = await signal_allows(
-            session, symbol, side="BUY", max_age_minutes=self.params.get("signal_max_age_minutes", 30)
-        )
+        """DCA only ever goes BUY (see _enter_position), so the
+        require_signal half of the gate is directional: the latest signal
+        must actually say BUY, not just "not NO_TRADE". Re-checked every
+        tick until it passes."""
+        allowed, reason = await self.entry_allowed(symbol, side="BUY", session=session)
         if not allowed:
             return
         await self._enter_position()
