@@ -7,18 +7,22 @@ Parameters:
     - grid_levels: int      (e.g., 10)
     - lot_size: float       (e.g., 0.01)
     - take_profit_pips: float
+    - require_signal: bool  (optional, default False) — see _maybe_arm_ladder
 """
 from __future__ import annotations
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.bots.base import BaseBot
+from app.services.signal_gate import signal_allows
 
 
 class GridBot(BaseBot):
     async def initialize(self) -> None:
         p = self.params
         symbol = p["symbol"]
-        levels = int(p.get("grid_levels", 10) or 10)
-        lot = float(p.get("lot_size", p.get("base_lot", 0.01)) or 0.01)
+        self._levels = int(p.get("grid_levels", 10) or 10)
+        self._lot = float(p.get("lot_size", p.get("base_lot", 0.01)) or 0.01)
 
         current_price = await self.broker.get_price(symbol)
 
@@ -29,25 +33,39 @@ class GridBot(BaseBot):
         if p.get("grid_spacing"):
             self.grid_spacing = float(p["grid_spacing"])
         elif p.get("upper_price") and p.get("lower_price"):
-            self.grid_spacing = (float(p["upper_price"]) - float(p["lower_price"])) / max(levels, 1)
+            self.grid_spacing = (float(p["upper_price"]) - float(p["lower_price"])) / max(
+                self._levels, 1
+            )
         elif p.get("grid_range"):
-            self.grid_spacing = float(p["grid_range"]) / max(levels, 1)
+            self.grid_spacing = float(p["grid_range"]) / max(self._levels, 1)
         else:
             self.grid_spacing = current_price * 0.001
 
         self.pending_orders: dict[str, dict] = {}
+        self._armed = False
 
-        # Place a symmetric ladder: buys below, sells above the current price.
-        half = max(levels // 2, 1)
+        if not p.get("require_signal"):
+            # Default behavior, unchanged from before require_signal existed:
+            # place the ladder immediately. A placement failure here surfaces
+            # as bot.status='error' via engine.py's _start(), same as always.
+            await self._arm_ladder(symbol, current_price)
+            self._armed = True
+        # else: arming is deferred to on_tick(), gated on Kronos's latest
+        # signal — see _maybe_arm_ladder(). Not an error to start "idle";
+        # the bot just waits for a signal it agrees with.
+
+    async def _arm_ladder(self, symbol: str, current_price: float) -> None:
+        """Place the symmetric ladder: buys below, sells above current price."""
+        half = max(self._levels // 2, 1)
         for i in range(1, half + 1):
             buy_price = current_price - (i * self.grid_spacing)
             sell_price = current_price + (i * self.grid_spacing)
 
             buy_order = await self.broker.place_limit_order(
-                symbol=symbol, side="BUY", price=buy_price, volume=lot, magic=self.magic
+                symbol=symbol, side="BUY", price=buy_price, volume=self._lot, magic=self.magic
             )
             sell_order = await self.broker.place_limit_order(
-                symbol=symbol, side="SELL", price=sell_price, volume=lot, magic=self.magic
+                symbol=symbol, side="SELL", price=sell_price, volume=self._lot, magic=self.magic
             )
             self.pending_orders[buy_order.id] = {
                 "type": "BUY",
@@ -58,7 +76,29 @@ class GridBot(BaseBot):
                 "opposite_price": sell_price - self.grid_spacing,
             }
 
-    async def on_tick(self, symbol: str, bid: float, ask: float) -> None:
+    async def _maybe_arm_ladder(self, symbol: str, bid: float, ask: float, session: AsyncSession) -> None:
+        """GRID is non-directional (it places both BUY and SELL legs at
+        once), so the gate here isn't "does Kronos want BUY or SELL" —
+        it's "does Kronos think this symbol is worth trading right now at
+        all". side=None in signal_allows() means exactly that: NO_TRADE (or
+        no signal, or a stale one) blocks; either BUY or SELL unblocks.
+        Re-checked every tick until it passes, or the bot is stopped.
+        """
+        allowed, reason = await signal_allows(
+            session, symbol, side=None, max_age_minutes=self.params.get("signal_max_age_minutes", 30)
+        )
+        if not allowed:
+            return
+        await self._arm_ladder(symbol, (bid + ask) / 2)
+        self._armed = True
+
+    async def on_tick(self, symbol: str, bid: float, ask: float, session: AsyncSession) -> None:
+        if not self._armed:
+            if self.params.get("require_signal"):
+                await self._maybe_arm_ladder(symbol, bid, ask, session)
+            if not self._armed:
+                return  # nothing placed yet — no positions to manage below
+
         # Take profit each filled leg once price has moved one grid_spacing in
         # its favor. This is the code that actually closes GRID positions —
         # on_order_filled() below never runs (the engine has no reliable way

@@ -159,7 +159,7 @@ class TradingEngine:
 
     async def _tick(self, running: RunningBot, bot: Bot, session) -> None:
         quote = await running.broker.get_quote(running.symbol)
-        await running.strategy.on_tick(running.symbol, quote.bid, quote.ask)
+        await running.strategy.on_tick(running.symbol, quote.bid, quote.ask, session)
         await self._sync_positions(running, bot, session)
 
     async def _sync_positions(self, running: RunningBot, bot: Bot, session) -> None:

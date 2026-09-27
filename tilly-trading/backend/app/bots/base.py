@@ -5,6 +5,8 @@ import hashlib
 from abc import ABC, abstractmethod
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.broker.base import BrokerClient
 
 
@@ -36,8 +38,11 @@ class BaseBot(ABC):
         """Set up initial state and place first orders."""
 
     @abstractmethod
-    async def on_tick(self, symbol: str, bid: float, ask: float) -> None:
-        """Called on every price update."""
+    async def on_tick(self, symbol: str, bid: float, ask: float, session: AsyncSession) -> None:
+        """Called on every price update. `session` is the engine's current
+        dispatch-cycle DB session — only needed by strategies that opt into
+        `require_signal` (see app/services/signal_gate.py); most bots can
+        ignore it."""
 
     @abstractmethod
     async def on_order_filled(self, order_id: str, fill_price: float, volume: float) -> None:

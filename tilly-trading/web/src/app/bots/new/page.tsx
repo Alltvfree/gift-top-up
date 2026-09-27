@@ -35,6 +35,7 @@ function NewBot() {
   const [accountId, setAccountId] = useState<string>("");
   const [accountSymbols, setAccountSymbols] = useState<string[] | null>(null);
   const [symbolsLoading, setSymbolsLoading] = useState(false);
+  const [requireSignal, setRequireSignal] = useState(false);
 
   useEffect(() => {
     fetchBrokerAccounts().then((a) => {
@@ -97,7 +98,7 @@ function NewBot() {
         name: name.trim(),
         strategy,
         symbol,
-        parameters: params ?? {},
+        parameters: requireSignal ? { ...(params ?? {}), require_signal: true } : (params ?? {}),
         ai_preset_used: params ? preset : null,
         broker_account_id: accountId,
       });
@@ -216,6 +217,25 @@ function NewBot() {
               ))}
             </select>
           )}
+        </label>
+
+        <label className="flex items-start gap-2.5 rounded-lg border border-line bg-panel2 p-3">
+          <input
+            type="checkbox"
+            checked={requireSignal}
+            onChange={(e) => setRequireSignal(e.target.checked)}
+            className="mt-0.5 size-4 accent-amber"
+          />
+          <span>
+            <span className="block font-mono text-[11px] font-semibold text-fg">
+              Require Kronos signal
+            </span>
+            <span className="mt-0.5 block text-[10px] text-muted">
+              Wait for an external model&apos;s forecast (Signals page) to agree before opening
+              positions in this symbol, instead of trading immediately. The bot sits idle — not
+              in error — until a fresh, matching signal shows up.
+            </span>
+          </span>
         </label>
       </section>
 

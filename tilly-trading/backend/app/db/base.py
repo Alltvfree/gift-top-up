@@ -39,5 +39,6 @@ from app.db.models import (  # noqa: E402,F401
     broker_account,
     order,
     position,
+    signal,
     user,
 )

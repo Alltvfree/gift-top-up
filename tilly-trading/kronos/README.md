@@ -50,8 +50,11 @@ infer.py     (loads the model, polls live bars, predicts, publishes)
      v
 publish_signal.py  (writes one row to Supabase's `signals` table)
      |
-     v
-Tilly's Signals page (web/src/app/signals/page.tsx) reads it live
+     +--> Tilly's Signals page (web/src/app/signals/page.tsx) reads it live
+     |
+     +--> backend/app/services/signal_gate.py — a bot with require_signal
+          set checks the latest row here before opening a position
+          (backend/app/bots/grid_bot.py, dca_bot.py)
 ```
 
 ## Setup
@@ -111,11 +114,15 @@ or backend or get committed anywhere.
 - **Multi-timeframe features** — `features.merge_higher_timeframe()` exists
   and is tested, but `train.py`/`infer.py` don't call it yet; they train on
   one timeframe's own indicators only.
-- **Bot-side gating** — Tilly's GRID/DCA bots don't check `signals` before
-  opening a position yet. That's a deliberate follow-up, not an oversight:
-  wiring an AI signal into when a bot is *allowed* to open a real position
-  is a live-trading-behavior change and deserves its own review, separate
-  from just getting the forecast visible on the Signals page.
+- ~~**Bot-side gating**~~ — done: a bot opts in with `require_signal: true`
+  in its parameters (a checkbox on the New Bot page), and only then checks
+  `app/services/signal_gate.py` before opening a position — GRID before
+  arming its ladder (side=None: any non-NO_TRADE signal unblocks, since
+  GRID trades both directions at once), DCA before each entry (side=BUY,
+  since it's directional). Every bot that doesn't set `require_signal`
+  behaves exactly as before this existed — verified with a regression test
+  proving the ungated path is untouched, plus tests for the gated wait/arm
+  behavior, against a real (in-memory) database, not mocks.
 - **The trade-quality / expected-movement models** from the notes'
   three-model architecture — this is the single TP-before-SL direction
   model only (Model 3 from the notes, doing double duty).
