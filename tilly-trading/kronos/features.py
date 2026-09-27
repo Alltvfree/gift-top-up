@@ -244,13 +244,30 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def merge_higher_timeframe(base: pd.DataFrame, higher: pd.DataFrame, prefix: str) -> pd.DataFrame:
     """Attach a higher timeframe's already-computed feature columns onto
-    the base timeframe by time. `direction="backward"` is what prevents
-    lookahead here: each base-timeframe row only ever sees the most
-    recently *closed* higher-timeframe bar as of that moment, never one
-    that closes later.
+    the base timeframe by time.
+
+    Critical subtlety: MT5 (mt5_data.download_history) labels every candle
+    by its OPEN time, not its close time. A naive backward-asof merge on
+    raw open timestamps would attach a higher-timeframe bar that has
+    *started* but not yet *closed* as of a given base row — e.g. at 10:05,
+    the H1 bar labeled "10:00" spans 10:00-11:00 and hasn't finished
+    forming yet, but in historical data its recorded close/high/low
+    already reflect everything through 11:00. Matching it to a 10:05 base
+    row would leak the rest of that hour backward in time. Fixed by
+    shifting the higher timeframe's match key forward by its own bar
+    duration (auto-detected from the median gap between its own rows)
+    before merging — a bar only becomes eligible once it has actually
+    closed. The output's own `time` column is unaffected (it's the base
+    row's real timestamp throughout); only the *matching* key is shifted.
     """
+    if len(higher) < 2:
+        raise ValueError("Need at least 2 higher-timeframe rows to detect its bar duration.")
+    bar_duration = higher["time"].diff().median()
+
     h = higher.add_prefix(f"{prefix}_")
     h = h.rename(columns={f"{prefix}_time": "time"})
+    h["time"] = h["time"] + bar_duration  # now represents each bar's CLOSE time, for matching only
+
     return pd.merge_asof(
         base.sort_values("time"), h.sort_values("time"), on="time", direction="backward"
     )
