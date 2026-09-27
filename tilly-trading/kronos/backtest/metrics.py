@@ -72,8 +72,15 @@ def trading_metrics(
 
     wins = trades[trades["net_pnl"] > 0]
     losses = trades[trades["net_pnl"] <= 0]
-    gross_profit = wins["net_pnl"].sum()
-    gross_loss = losses["net_pnl"].sum()  # negative or zero
+    # "Gross" profit/loss means pre-commission (the trades' own `gross_pnl`
+    # column — see simulator.Trade), NOT `net_pnl` again. A trade's win/loss
+    # bucket is still decided by its actual (net, commission-included)
+    # result — what mattered to the account — but the bucket TOTALS must
+    # come from gross_pnl or "gross" vs "net" would report the same number
+    # twice and profit_factor would silently be net/net instead of the
+    # pre-commission figure Phase 8/15 asks for.
+    gross_profit = wins["gross_pnl"].sum()
+    gross_loss = losses["gross_pnl"].sum()  # negative or zero
     final_balance = initial_balance + trades["net_pnl"].sum()
 
     consecutive_wins = _max_consecutive(trades["net_pnl"] > 0)

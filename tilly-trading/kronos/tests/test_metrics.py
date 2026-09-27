@@ -26,9 +26,16 @@ def test_trading_metrics_empty_trades_is_safe():
 
 
 def test_trading_metrics_separates_wins_and_losses_correctly():
+    # net_pnl = gross_pnl - commission, same as simulator.py actually computes
+    # it — gross_pnl deliberately differs from net_pnl here so a test that
+    # accidentally read gross_profit/gross_loss off net_pnl instead of
+    # gross_pnl (a real bug this project shipped once — caught by comparing
+    # a live backtest's trades.csv gross_pnl column against its own reported
+    # gross_profit/gross_loss) would fail this assertion.
     trades = pd.DataFrame(
         {
             "net_pnl": [100.0, -50.0, 200.0, -30.0],
+            "gross_pnl": [101.0, -49.0, 201.0, -29.0],
             "commission": [1, 1, 1, 1], "spread_cost": [1, 1, 1, 1], "slippage_cost": [1, 1, 1, 1],
             "direction": ["BUY", "SELL", "BUY", "SELL"],
             "exit_reason": ["TP", "SL", "TP", "SL"],
@@ -41,9 +48,9 @@ def test_trading_metrics_separates_wins_and_losses_correctly():
     assert m["winning_trades"] == 2
     assert m["losing_trades"] == 2
     assert m["win_rate"] == 0.5
-    assert m["gross_profit"] == 300.0
-    assert m["gross_loss"] == -80.0
-    assert m["profit_factor"] == 300.0 / 80.0
+    assert m["gross_profit"] == 302.0
+    assert m["gross_loss"] == -78.0
+    assert m["profit_factor"] == 302.0 / 78.0
     assert m["net_profit"] == 220.0
     assert m["tp_exits"] == 2
     assert m["sl_exits"] == 2
