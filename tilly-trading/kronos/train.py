@@ -2,11 +2,12 @@
 
 Chronological split only — train/validation/test are contiguous, ordered
 time windows (never a random shuffle), so the model is never evaluated on
-data that occurred before data it trained on. Full walk-forward validation
-(retraining across multiple rolling windows, per the project notes' Phase 5)
-is a documented follow-up, not implemented here — this is Phase 1/2: a
-single chronological split, enough to tell whether the approach has any
-signal before investing in the rest of the roadmap.
+data that occurred before data it trained on. This file itself still does
+just one single chronological split (Phase 1/2 — enough to tell whether the
+approach has any signal at all); full walk-forward validation (retraining
+across multiple rolling windows) is `backtest/walk_forward.py`, which calls
+back into this file's own `prepare_dataset`/`train_model` per window rather
+than duplicating them — see kronos/README.md's "Phase 3" section.
 
 Optionally adds a higher timeframe's own features as context (--higher-
 timeframe), via features.merge_higher_timeframe — e.g. training on M5 with
@@ -92,10 +93,31 @@ def prepare_dataset(
 
 
 def train_model(
-    dataset: pd.DataFrame, feature_columns: list[str] | None = None, params: dict | None = None
+    dataset: pd.DataFrame | None = None,
+    feature_columns: list[str] | None = None,
+    params: dict | None = None,
+    train_df: pd.DataFrame | None = None,
+    val_df: pd.DataFrame | None = None,
+    test_df: pd.DataFrame | None = None,
 ) -> tuple[lgb.Booster, dict]:
+    """Either pass `dataset` alone (the original single-chronological-split
+    behavior: internally split 70/15/15 via chronological_split), or pass
+    `train_df`/`val_df`/`test_df` explicitly (used by backtest/walk_forward.py,
+    which needs exact calendar-boundary control over each split that a
+    fixed 70/15/15 fraction can't give it). Passing both is an error — it's
+    ambiguous which one should win."""
     feature_columns = feature_columns or FEATURE_COLUMNS
-    train_df, val_df, test_df = chronological_split(dataset)
+    explicit_splits = train_df is not None or val_df is not None or test_df is not None
+    if explicit_splits and dataset is not None:
+        raise ValueError("Pass either `dataset` or train_df/val_df/test_df, not both.")
+    if explicit_splits:
+        if train_df is None or val_df is None or test_df is None:
+            raise ValueError("train_df, val_df, and test_df must all be given together.")
+    elif dataset is not None:
+        train_df, val_df, test_df = chronological_split(dataset)
+    else:
+        raise ValueError("Must pass either `dataset` or train_df/val_df/test_df.")
+
     if len(train_df) == 0 or len(val_df) == 0 or len(test_df) == 0:
         raise ValueError("Not enough rows to split into train/val/test — need more history.")
 

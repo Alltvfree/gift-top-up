@@ -17,22 +17,26 @@ one — either way, it needs its own MT5 terminal login (it does not go
 through the bridge).
 
 > **Tested against synthetic data, not real MT5 history.** `features.py`,
-> `labels.py`, and `train.py`'s chronological split/training loop have no
-> MT5 dependency and were verified end-to-end against synthetic OHLC data:
-> a no-lookahead check (truncating future bars doesn't change past feature
-> values), a multi-timeframe merge check (never attaches a future
-> higher-timeframe bar), a labeling check against a hand-constructed price
-> path with a known TP/SL outcome, and a full train/val/test run whose test
-> AUC came out ≈0.50 on pure random-walk data — exactly what "no leakage"
-> looks like, since real leakage would show up as suspiciously *high* AUC
-> on data with no actual signal in it. `mt5_data.py` itself (the real MT5
-> IPC calls) could not be tested — no Windows machine or MT5 terminal
-> exists in this environment — same caveat as `bridge.py`. `add-kronos.ps1`
-> was reviewed the same way as every other script in this project (checked
-> for balanced braces/parens, matches the exact Scheduled Task pattern
-> already field-verified in `mt5-bridge/`) but likewise not executed.
-> Confirm it against your own broker/terminal before trusting a trained
-> model.
+> `labels.py`, `train.py`'s chronological split/training loop, and the
+> entire `backtest/` package have no MT5 dependency and are verified
+> end-to-end against synthetic OHLC data by a committed pytest suite
+> (`kronos/tests/` — run `pip install -r requirements.txt && pytest` from
+> inside `kronos/`; 75 tests as of this writing): no-lookahead checks
+> (truncating future bars doesn't change past feature values), a
+> multi-timeframe merge check (never attaches a still-forming
+> higher-timeframe bar — see "Leakage audit" below), a labeling check
+> against hand-constructed price paths with known TP/SL outcomes, a full
+> train/val/test run whose test AUC came out ≈0.50 on pure random-walk data
+> (exactly what "no leakage" looks like — real leakage would show up as
+> suspiciously *high* AUC on data with no actual signal in it), and the
+> realistic execution simulator's cost/TP-SL/position-sizing math against
+> known-outcome price paths. `mt5_data.py` itself (the real MT5 IPC calls)
+> could not be tested — no Windows machine or MT5 terminal exists in this
+> environment — same caveat as `bridge.py`. `add-kronos.ps1` was reviewed
+> the same way as every other script in this project (checked for balanced
+> braces/parens, matches the exact Scheduled Task pattern already
+> field-verified in `mt5-bridge/`) but likewise not executed. Confirm it
+> against your own broker/terminal before trusting a trained model.
 
 ## How the pieces fit together
 
@@ -48,6 +52,9 @@ labels.py    (TP-before-SL outcome labels, only place that looks forward)
      v
 train.py     (chronological split + LightGBM -> kronos_model.txt)
      |
+     +--> backtest/ (Phase 3 — walk-forward retraining + realistic
+     |     execution simulation -> reports/<timestamp>/report.html;
+     |     see "Phase 3 — the realistic walk-forward backtester" below)
      v
 infer.py     (loads the model, polls live bars, predicts, publishes)
      |
@@ -124,16 +131,105 @@ same for everyone) — readable by anyone, but only the service_role key can
 write, so `publish_signal.py`'s key must never end up in the Tilly frontend
 or backend or get committed anywhere.
 
+## Phase 3 — the realistic walk-forward backtester
+
+`backtest/` answers the question `train.py`'s single AUC number can't:
+does this model make money after real trading costs, evaluated the way a
+live system would actually see the data (chronologically, retrained
+forward through time, never peeking at a test period while building the
+model that gets scored on it)?
+
+```
+mt5_data.py -> backtest/__main__.py (CLI)
+                    |
+                    v
+              backtest/windows.py       (rolls [train][embargo][val][embargo][test] forward)
+                    |
+                    v
+              backtest/walk_forward.py  (per window: train.prepare_dataset + train.train_model,
+                    |                    frozen model predicts only that window's own test rows)
+                    v
+              backtest/simulator.py     (next-bar entry, bid/ask spread+slippage, TP/SL,
+                    |                    same-bar-both-hit policy, cooldown, position sizing)
+                    v
+              backtest/metrics.py + report.py -> reports/<timestamp>/report.html + CSVs
+```
+
+Run it from inside `kronos/`:
+
+```powershell
+python -m backtest --symbol BTCUSDm --config config/backtest.yaml --quick   # fast smoke test, ~6k bars
+python -m backtest --symbol BTCUSDm --config config/backtest.yaml --full    # full walk-forward, config's own window sizes
+python -m backtest --symbol XAUUSDm --config config/backtest_xauusd.yaml --full
+```
+
+(Not `backtest.py` — a same-named script and package can't coexist cleanly
+in one directory, and `-m` is the unambiguous way to run a package as an
+entrypoint. See `backtest/__main__.py`'s own docstring.)
+
+**Execution convention** (documented explicitly, not left implicit — this
+matters because it's easy to get backwards): a signal is computed from a
+bar's own close, but the trade enters at the *next* bar's open
+(`execution.next_bar: true`, the only realistic setting) — a live system
+cannot act on a candle's close the instant it prints. Spread is charged
+once, at entry (crossing the bid/ask on a market order); a TP/SL exit is
+modeled as a resting order triggered at its exact level plus slippage only
+(no second spread charge — this matches how MT5 accounts for stop/limit
+exits); a `TIME_EXIT`/`END_OF_TEST` close is a market order and does cross
+the spread again. If both TP and SL are reachable within the same bar
+(OHLC only, no tick data), `same_bar_exit_policy: conservative` (the
+default) assumes the stop-loss happened first.
+
+**Leakage audit**: every backtest run re-verifies, independently of
+`features.merge_higher_timeframe`'s own (already-fixed) logic, that no
+attached higher-timeframe bar could see information from before it
+actually closed (`backtest/leakage_audit.py`) — this is exactly the bug
+this project already found and fixed once (the 0.7704 → 0.5317 AUC story
+above). A regression test
+(`tests/test_walk_forward.py::test_corrupted_merge_is_caught_by_the_runtime_leakage_audit`)
+deliberately reintroduces the old naive merge and proves the audit stops
+the run rather than silently producing an inflated AUC again. The full
+audit table (which categories were checked, and why each one is safe) is
+in every report's own "Leakage Audit" section — including *why* feature
+scaling isn't a checked category here: LightGBM is tree-based and splits
+on raw values, so there's no fitted scaler to leak train-set statistics
+through in the first place.
+
+**What it does NOT (yet) do**, so nobody mistakes an MVP for the whole
+spec: TP/SL as an ATR multiple (only fixed points/price distances are
+implemented — a symbol-appropriate fixed distance is what every real
+training run in this file has used so far anyway); trailing stops or
+break-even moves (the current strategy doesn't use them, and the project's
+own instruction was "don't enable advanced features unless the current
+strategy already uses them"); a historical bid/ask spread mode beyond
+MT5's own recorded per-bar `spread` column (which is real data, and is the
+default — `spread.mode: historical`). All three are additive, not
+architectural, follow-ups.
+
+**Tested against synthetic data** (`kronos/tests/`, run with `pytest` from
+inside `kronos/`): 75 tests covering every module — no-lookahead checks on
+`features.py`/`train.py` (now actually committed here, not just run ad hoc
+during development), hand-constructed price paths with known TP/SL
+outcomes through the realistic execution simulator (spread/slippage/
+commission math, same-bar policy, cooldown, position sizing, time exits,
+end-of-test handling), the walk-forward window generator's chronological
+non-overlap guarantees, the leakage-audit regression test above, and a
+full end-to-end walk-forward run producing a real HTML report. Like every
+other file in this project, `backtest/__main__.py`'s actual MT5 download
+step has not been run against a live terminal — confirm the first real
+`--quick` run's numbers before trusting a `--full` one.
+
 ## What's not built yet (see the notes' own phased roadmap)
 
 - **Walk-forward validation** (retraining across multiple rolling windows)
   — this is a single chronological split, Phase 1/2 of the notes, not
   Phase 5.
-- **A realistic backtester** with spread/slippage/commission, drawdown,
-  Sharpe/Sortino, expectancy — `train.py` only reports classification
-  metrics (AUC, accuracy), which the notes explicitly warn isn't enough:
-  "A model can have good classification accuracy and still lose money
-  after spread, slippage, commissions and bad risk management."
+- ~~**A realistic backtester**~~ — done: see "Phase 3 — the realistic
+  walk-forward backtester" below. `train.py`'s own AUC/accuracy were never
+  enough on their own — "A model can have good classification accuracy and
+  still lose money after spread, slippage, commissions and bad risk
+  management" (the notes' own warning) — the backtester is what actually
+  answers the money question, not just the classification one.
 - ~~**Multi-timeframe features**~~ — done: `train.py --higher-timeframe H1`
   (or any timeframe) merges that timeframe's own features in via
   `features.merge_higher_timeframe`, auto-computing how much higher-

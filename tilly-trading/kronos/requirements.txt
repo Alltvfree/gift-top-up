@@ -8,3 +8,6 @@ pandas==3.0.6
 numpy==2.4.6
 scikit-learn==1.9.1
 supabase==2.31.0
+# backtest/ (Phase 3 - the realistic walk-forward backtester) only:
+PyYAML==6.0.2
+matplotlib==3.10.0
