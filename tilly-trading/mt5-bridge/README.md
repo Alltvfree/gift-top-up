@@ -129,6 +129,38 @@ approach is the one that's actually been confirmed working. Either way,
 disable Windows sleep/hibernate — a sleeping PC means a sleeping bridge
 means bots silently stop trading.
 
+## Troubleshooting: tunnel connects but requests fail with raw HTML, not JSON
+
+Symptom: `MT5BridgeError: ... -> 502: <!DOCTYPE html>...` — an HTML page,
+not this bridge's own JSON error — sometimes even on `GET /health`, the
+simplest possible request. That HTML is Cloudflare's own edge error page,
+meaning the request never reached the bridge process at all.
+
+Found live on a real VPS: `cloudflared`'s connectivity pre-checks passed
+cleanly and the tunnel registered 4 connections successfully, but requests
+still failed intermittently minutes later, with `Failed to initialize DNS
+local resolver ... i/o timeout` appearing in its own logs. Root cause:
+`cloudflared` defaults to QUIC (UDP-based), and this VPS's network handled
+UDP worse than TCP — a known category of flakiness on some hosting
+providers/firewalls. Forcing TCP-based HTTP/2 fixed it completely and has
+been stable since:
+```powershell
+cloudflared tunnel --protocol http2 --config "$env:USERPROFILE\.cloudflared\config.yml" run
+```
+`setup-tunnel.ps1` now passes `--protocol http2` by default for exactly
+this reason. If you're running a tunnel some other way (manually, or from
+before this default existed) and see this symptom, add that flag to
+whatever registers or launches it.
+
+Also worth checking first, since it looks identical from the app's side:
+a Scheduled Task that simply isn't running (e.g. after a PC restart, if it
+was never registered as a task in the first place — `Get-ScheduledTask`
+won't show anything to restart). `Get-Command cloudflared` plus
+`dir "$env:USERPROFILE\.cloudflared"` will show whether `cloudflared.exe`
+and this tunnel's credentials/cert still exist so you can rebuild
+`config.yml` and re-register it without recreating the tunnel from
+scratch.
+
 ## Security notes
 
 - Every endpoint (including `/health`) requires `Authorization: Bearer

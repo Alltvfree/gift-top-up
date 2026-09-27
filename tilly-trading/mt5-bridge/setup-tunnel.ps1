@@ -160,8 +160,16 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $taskName = "TillyMT5Tunnel-$ClientSlug"
+# --protocol http2 rather than the default (QUIC, over UDP): found live on a
+# real VPS where QUIC's initial handshake and connectivity pre-checks passed
+# cleanly, but the tunnel then intermittently failed actual proxied requests
+# with a raw Cloudflare edge 502 (not this bridge's own JSON error) minutes
+# later, alongside "Failed to initialize DNS local resolver ... i/o timeout"
+# in cloudflared's own logs. Forcing TCP-based HTTP/2 made it fully stable —
+# consistent with UDP being handled worse than TCP by some VPS network
+# stacks/firewalls, a known category of cloudflared flakiness.
 Register-InteractiveTask -TaskName $taskName -Execute $cloudflaredExe `
-    -Argument "tunnel --config `"$configPath`" run $tunnelName"
+    -Argument "tunnel --protocol http2 --config `"$configPath`" run $tunnelName"
 Write-Host "Registered Scheduled Task '$taskName' (starts at logon, restarts on failure)."
 
 Write-Host "Starting the tunnel now..."
