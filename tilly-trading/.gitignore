@@ -37,3 +37,10 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Kronos: locally trained/collected artifacts, never committed (same
+# discipline as kronos_model*.txt, which was never gitignored either but
+# is likewise always trained fresh on the target machine, not shipped).
+kronos/news/models/*.joblib
+kronos/news/data/*.jsonl
+kronos/reports/

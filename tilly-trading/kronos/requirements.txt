@@ -8,6 +8,8 @@ pandas==3.0.6
 numpy==2.4.6
 scikit-learn==1.9.1
 supabase==2.31.0
+# news/ (local trained sentiment classifier) reuses scikit-learn above
+# (TfidfVectorizer, LogisticRegression, joblib) - no extra dependency.
 # backtest/ (Phase 3 - the realistic walk-forward backtester) has NO extra
 # dependencies beyond what's already above. It intentionally avoids two
 # packages that would otherwise be the obvious choice:

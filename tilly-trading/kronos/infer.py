@@ -54,7 +54,14 @@ def latest_signal(
     higher_lookback_bars: int = 300,
     buy_threshold: float = BUY_THRESHOLD,
     sell_threshold: float = SELL_THRESHOLD,
+    news_store_path: str | None = None,
+    news_windows: tuple[int, ...] | None = None,
 ) -> dict:
+    """news_store_path: only pass this if BOTH models were trained with
+    train.py --news-store (see that file's own docstring for why this
+    can't come from backtest/walk_forward.py) — must match, or predict()
+    fails loudly on a missing feature column rather than mispredicting
+    silently, same as a --higher-timeframe mismatch."""
     raw = download_history(symbol, timeframe, lookback_bars)
     feats = compute_features(raw)
 
@@ -64,7 +71,15 @@ def latest_signal(
         higher_feats = compute_features(higher_raw)
         feats = merge_higher_timeframe(feats, higher_feats, prefix=higher_prefix)
 
-    feature_columns = feature_columns_for(higher_prefix)
+    if news_store_path:
+        from news.features import DEFAULT_WINDOWS_MINUTES, attach_news_features
+        from news.store import load_articles
+
+        news_windows = news_windows or DEFAULT_WINDOWS_MINUTES
+        articles = load_articles(news_store_path)  # reloaded fresh every cycle — the store keeps growing live
+        feats = attach_news_features(feats, articles, news_windows)
+
+    feature_columns = feature_columns_for(higher_prefix, news_windows if news_store_path else None)
     feats = feats.dropna(subset=feature_columns)
     if feats.empty:
         raise RuntimeError(
@@ -109,6 +124,7 @@ def run_loop(
     higher_lookback_bars: int = 300,
     buy_threshold: float = BUY_THRESHOLD,
     sell_threshold: float = SELL_THRESHOLD,
+    news_store_path: str | None = None,
 ) -> None:
     model_buy = lgb.Booster(model_file=model_buy_path)
     model_sell = lgb.Booster(model_file=model_sell_path)
@@ -119,6 +135,7 @@ def run_loop(
                 signal = latest_signal(
                     model_buy, model_sell, symbol, timeframe, lookback_bars,
                     higher_timeframe, higher_lookback_bars, buy_threshold, sell_threshold,
+                    news_store_path=news_store_path,
                 )
                 publish_signal(**signal)
                 print(f"Published: {signal}")
@@ -156,6 +173,12 @@ def main() -> None:
     )
     parser.add_argument("--buy-threshold", type=float, default=BUY_THRESHOLD)
     parser.add_argument("--sell-threshold", type=float, default=SELL_THRESHOLD)
+    parser.add_argument(
+        "--news-store",
+        default=None,
+        help="Path to a news/store.py JSONL article file (see collect_news.py) - only pass this if BOTH "
+        "models were trained with train.py --news-store using the same path's history.",
+    )
     parser.add_argument("--poll-seconds", type=int, default=60)
     args = parser.parse_args()
     run_loop(
@@ -169,6 +192,7 @@ def main() -> None:
         args.higher_lookback_bars,
         args.buy_threshold,
         args.sell_threshold,
+        news_store_path=args.news_store,
     )
 
 

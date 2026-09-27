@@ -88,7 +88,7 @@ def build_audit_table(has_higher_timeframe: bool) -> list[LeakageAuditEntry]:
         LeakageAuditEntry(
             "Market structure (swing highs/lows, support/resistance, breakouts)",
             "OK",
-            "features._support_resistance() only confirms a swing at position i once "
+            "features._market_structure() only confirms a swing at position i once "
             "SWING_LAG bars have passed on both sides — the most recent SWING_LAG bars' "
             "swing status is genuinely unconfirmed, matching what a live system could "
             "actually know at that bar.",

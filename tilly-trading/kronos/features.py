@@ -78,17 +78,47 @@ SWING_LAG = 5
 MAX_TRACKED_LEVELS = 20
 
 
-def _support_resistance(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.DataFrame:
+def _market_structure(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.DataFrame:
     """Distance to the nearest confirmed swing-high (resistance, above
-    price) and swing-low (support, below price), plus whether price has
-    broken beyond every recently confirmed level in either direction.
+    price) and swing-low (support, below price), whether price has broken
+    beyond every recently confirmed level in either direction, and a set of
+    "smart money concepts" style event features built on the SAME confirmed
+    swings: break of structure (BOS), change of character (CHoCH), and
+    liquidity sweeps.
 
     Lookahead-safe by construction: at bar t, only swings at position
     i <= t - SWING_LAG are used, since a swing at i needs bars up to i+k to
     be confirmed at all. This is the one thing in this file most tempting
     to get wrong — a naive centered rolling-window swing detector (used
     without this confirmation-lag bookkeeping) would silently leak future
-    bars into a "live" feature.
+    bars into a "live" feature. Reused for every feature below rather than
+    re-detecting swings a second way, so they can't silently drift apart —
+    an earlier reference implementation of BOS/CHoCH (a ChatGPT-authored
+    prototype reviewed alongside this one) computed its own separate pivot
+    detector via `.shift(left).rolling(left+right+1).max()`, which doesn't
+    actually implement a two-sided confirmed pivot at all (it compares each
+    bar's high to a max computed from an *earlier*, already-passed window)
+    — no lookahead, but not a correct swing detector either. This function
+    avoids that by building strictly on the swing detector above, already
+    tested against hand-constructed price paths.
+
+    BOS/liquidity-sweep definitions:
+      - bos_bull/bos_bear ("break of structure"): an EVENT flag — fires only
+        on the bar whose close first crosses beyond the most recently
+        confirmed swing high/low (broke_resistance/broke_support are the
+        persistent-state version of the same idea, staying 1 every bar
+        price remains beyond the level).
+      - liquidity_sweep_high/low: this bar's wick alone pokes beyond the
+        most recently confirmed swing level but closes back on the other
+        side of it (a "stop hunt") — non-lookahead by construction, since it
+        only compares the CURRENT bar's own high/low/close against an
+        already-confirmed prior level.
+      - structure_bias: +1 while the two most recently confirmed swings are
+        a higher high AND a higher low (bullish), -1 for a lower high and
+        lower low (bearish), 0 while ambiguous or not enough confirmed
+        swings exist yet.
+      - choch ("change of character"): fires the bar structure_bias flips
+        from bullish to bearish or back.
     """
     n = len(close)
     h = high.to_numpy()
@@ -113,10 +143,20 @@ def _support_resistance(high: pd.Series, low: pd.Series, close: pd.Series) -> pd
     dist_to_support_pct = np.full(n, np.nan)
     broke_resistance = np.zeros(n, dtype=int)
     broke_support = np.zeros(n, dtype=int)
+    bos_bull = np.zeros(n, dtype=int)
+    bos_bear = np.zeros(n, dtype=int)
+    liquidity_sweep_high = np.zeros(n, dtype=int)
+    liquidity_sweep_low = np.zeros(n, dtype=int)
+    structure_bias = np.zeros(n, dtype=int)
+    choch = np.zeros(n, dtype=int)
 
     confirmed_highs: deque[float] = deque(maxlen=MAX_TRACKED_LEVELS)
     confirmed_lows: deque[float] = deque(maxlen=MAX_TRACKED_LEVELS)
     confirmed_up_to = -1  # last position whose swing status is knowable as of the current bar
+
+    last_swing_high = prev_swing_high = np.nan
+    last_swing_low = prev_swing_low = np.nan
+    bias = 0
 
     for t in range(n):
         newly_confirmable = t - SWING_LAG
@@ -125,8 +165,10 @@ def _support_resistance(high: pd.Series, low: pd.Series, close: pd.Series) -> pd
             i = confirmed_up_to
             if is_swing_high[i]:
                 confirmed_highs.append(h[i])
+                prev_swing_high, last_swing_high = last_swing_high, h[i]
             if is_swing_low[i]:
                 confirmed_lows.append(l[i])
+                prev_swing_low, last_swing_low = last_swing_low, l[i]
 
         above = [p for p in confirmed_highs if p > c[t]]
         below = [p for p in confirmed_lows if p < c[t]]
@@ -146,12 +188,41 @@ def _support_resistance(high: pd.Series, low: pd.Series, close: pd.Series) -> pd
             dist_to_support_pct[t] = 0.0
             broke_support[t] = 1
 
+        prev_close = c[t - 1] if t > 0 else np.nan
+        if np.isfinite(last_swing_high) and c[t] > last_swing_high and not (np.isfinite(prev_close) and prev_close > last_swing_high):
+            bos_bull[t] = 1
+        if np.isfinite(last_swing_low) and c[t] < last_swing_low and not (np.isfinite(prev_close) and prev_close < last_swing_low):
+            bos_bear[t] = 1
+
+        if np.isfinite(last_swing_high) and h[t] > last_swing_high and c[t] < last_swing_high:
+            liquidity_sweep_high[t] = 1
+        if np.isfinite(last_swing_low) and l[t] < last_swing_low and c[t] > last_swing_low:
+            liquidity_sweep_low[t] = 1
+
+        if (
+            np.isfinite(last_swing_high) and np.isfinite(prev_swing_high)
+            and np.isfinite(last_swing_low) and np.isfinite(prev_swing_low)
+        ):
+            if last_swing_high > prev_swing_high and last_swing_low > prev_swing_low:
+                bias = 1
+            elif last_swing_high < prev_swing_high and last_swing_low < prev_swing_low:
+                bias = -1
+        structure_bias[t] = bias
+        if t > 0 and bias != 0 and structure_bias[t - 1] != bias and structure_bias[t - 1] != 0:
+            choch[t] = 1
+
     return pd.DataFrame(
         {
             "dist_to_resistance_pct": dist_to_resistance_pct,
             "dist_to_support_pct": dist_to_support_pct,
             "broke_resistance": broke_resistance,
             "broke_support": broke_support,
+            "bos_bull": bos_bull,
+            "bos_bear": bos_bear,
+            "liquidity_sweep_high": liquidity_sweep_high,
+            "liquidity_sweep_low": liquidity_sweep_low,
+            "structure_bias": structure_bias,
+            "choch": choch,
         },
         index=close.index,
     )
@@ -211,15 +282,20 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     out["adx_14"] = _adx(high, low, close, 14)
 
     # Market structure — simple bar-to-bar higher-high / lower-low flags,
-    # plus real support/resistance levels from confirmed swing points
-    # (_support_resistance handles its own no-lookahead bookkeeping).
+    # real support/resistance levels, and BOS/CHoCH/liquidity-sweep event
+    # features, all from confirmed swing points (_market_structure handles
+    # its own no-lookahead bookkeeping).
     out["higher_high"] = (high > high.shift(1)).astype(int)
     out["lower_low"] = (low < low.shift(1)).astype(int)
-    sr = _support_resistance(high, low, close)
-    out["dist_to_resistance_pct"] = sr["dist_to_resistance_pct"]
-    out["dist_to_support_pct"] = sr["dist_to_support_pct"]
-    out["broke_resistance"] = sr["broke_resistance"]
-    out["broke_support"] = sr["broke_support"]
+    ms = _market_structure(high, low, close)
+    for col in ms.columns:
+        out[col] = ms[col]
+
+    # Fair value gap (FVG) proxy — a 3-candle imbalance: this bar's low sits
+    # above the high from 2 bars ago (bullish gap) or vice versa. Pure
+    # .shift() comparison, no swing-confirmation dependency, non-lookahead.
+    out["fvg_bull"] = (low > high.shift(2)).astype(int)
+    out["fvg_bear"] = (high < low.shift(2)).astype(int)
 
     # Candle structure
     body = (close - open_).abs()
@@ -281,6 +357,8 @@ FEATURE_COLUMNS = [
     "atr_pct", "bb_width_20", "candle_range_pct", "rolling_std_20", "adx_14",
     "higher_high", "lower_low",
     "dist_to_resistance_pct", "dist_to_support_pct", "broke_resistance", "broke_support",
+    "bos_bull", "bos_bear", "liquidity_sweep_high", "liquidity_sweep_low",
+    "structure_bias", "choch", "fvg_bull", "fvg_bear",
     "body_pct_of_range", "upper_wick_pct", "lower_wick_pct", "bullish_candle",
     "hour", "day_of_week", "session_asian", "session_london", "session_new_york",
 ]

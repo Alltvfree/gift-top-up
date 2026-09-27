@@ -39,15 +39,26 @@ def chronological_split(
     return df.iloc[:train_end], df.iloc[train_end:val_end], df.iloc[val_end:]
 
 
-def feature_columns_for(higher_prefix: str | None) -> list[str]:
+def feature_columns_for(higher_prefix: str | None, news_windows: tuple[int, ...] | None = None) -> list[str]:
     """The full feature-column list a dataset/model uses — base columns,
-    plus the higher-timeframe columns (same names, prefixed) if a higher
-    timeframe was merged in. Centralized here so prepare_dataset,
+    the higher-timeframe columns (same names, prefixed) if a higher
+    timeframe was merged in, and the news feature columns (news/features.py)
+    if news_windows is given. Centralized here so prepare_dataset,
     train_model, and infer.py's latest_signal all derive it the same way
-    instead of three copies of this string-building drifting apart."""
+    instead of three copies of this string-building drifting apart.
+
+    news_windows is NOT threaded through backtest/walk_forward.py — see
+    prepare_dataset's own docstring for why wiring news features into the
+    walk-forward backtester specifically would be actively misleading
+    right now, not just premature.
+    """
     cols = list(FEATURE_COLUMNS)
     if higher_prefix:
         cols += [f"{higher_prefix}_{c}" for c in FEATURE_COLUMNS]
+    if news_windows:
+        from news.features import news_feature_columns  # noqa: PLC0415 - optional, avoid a hard import-time dependency
+
+        cols += news_feature_columns(news_windows)
     return cols
 
 
@@ -59,11 +70,26 @@ def prepare_dataset(
     max_bars_forward: int = 50,
     higher_raw: pd.DataFrame | None = None,
     higher_prefix: str = "htf",
+    news_articles: pd.DataFrame | None = None,
+    news_windows: tuple[int, ...] | None = None,
 ) -> pd.DataFrame:
     """raw: OHLC bars (see mt5_data.download_history's output shape).
     higher_raw: optionally, a second, higher timeframe's own OHLC bars
     covering the same (or a wider) span — its features get merged in via
     merge_higher_timeframe, prefixed with `higher_prefix`.
+    news_articles: optionally, a news/store.load_articles()-shaped
+    DataFrame — its features get merged in via news.features.attach_news_
+    features (timestamp-safe; see that module's own docstring). Meant for
+    infer.py's LIVE predictions and for retraining once you've collected
+    real news history over time (news/README.md) — deliberately NOT
+    threaded into backtest/walk_forward.py: a walk-forward test window
+    from before you started collecting has ZERO real news coverage, so
+    every news feature would silently read as 0 for most of history and
+    only become real in the most recent slice — not a fair test of
+    whether the feature helps, just a feature that's usually absent
+    dressed up as one that's usually neutral. Train/test on it live,
+    honestly, once real coverage actually exists, rather than backtest
+    against a history the news pipeline was never actually watching.
 
     Returns feature columns + a `label` column, with rows dropped wherever
     either isn't available (early rows before indicators have enough
@@ -80,6 +106,12 @@ def prepare_dataset(
     if higher_raw is not None:
         higher_feats = compute_features(higher_raw.reset_index(drop=True))
         feats = merge_higher_timeframe(feats, higher_feats, prefix=higher_prefix)
+    if news_articles is not None:
+        from news.features import attach_news_features  # noqa: PLC0415 - optional, avoid a hard import-time dependency
+        from news.features import DEFAULT_WINDOWS_MINUTES as NEWS_DEFAULT_WINDOWS_MINUTES  # noqa: PLC0415,N812
+
+        news_windows = news_windows or NEWS_DEFAULT_WINDOWS_MINUTES
+        feats = attach_news_features(feats, news_articles, news_windows)
 
     # merge_asof (inside merge_higher_timeframe) re-sorts by time and can
     # hand back a fresh index — reset explicitly and assign the label by
@@ -88,7 +120,10 @@ def prepare_dataset(
     feats = feats.reset_index(drop=True)
     feats["label"] = labels.values
 
-    cols = feature_columns_for(higher_prefix if higher_raw is not None else None)
+    cols = feature_columns_for(
+        higher_prefix if higher_raw is not None else None,
+        news_windows if news_articles is not None else None,
+    )
     return feats.dropna(subset=[*cols, "label"]).reset_index(drop=True)
 
 
@@ -177,10 +212,23 @@ def main() -> None:
     parser.add_argument("--tp", type=float, default=3.0, help="Take-profit distance in price units.")
     parser.add_argument("--sl", type=float, default=2.0, help="Stop-loss distance in price units.")
     parser.add_argument("--max-bars-forward", type=int, default=50)
+    parser.add_argument(
+        "--news-store",
+        default=None,
+        help="Path to a news/store.py JSONL article file (see collect_news.py) - adds news/features.py's "
+        "sentiment/count features. Only meaningful once you've collected real history over time; see "
+        "prepare_dataset's own docstring for why this isn't available in backtest/walk_forward.py.",
+    )
     parser.add_argument("--out", default="kronos_model.txt")
     args = parser.parse_args()
 
     higher_prefix = args.higher_timeframe.lower() if args.higher_timeframe else None
+    news_articles = None
+    if args.news_store:
+        from news.store import load_articles
+
+        news_articles = load_articles(args.news_store)
+        print(f"Loaded {len(news_articles)} articles from {args.news_store}")
 
     connect()
     try:
@@ -200,8 +248,10 @@ def main() -> None:
         args.max_bars_forward,
         higher_raw=higher_raw,
         higher_prefix=higher_prefix or "htf",
+        news_articles=news_articles,
     )
-    model, metrics = train_model(dataset, feature_columns=feature_columns_for(higher_prefix))
+    news_windows = (15, 60, 240) if news_articles is not None else None
+    model, metrics = train_model(dataset, feature_columns=feature_columns_for(higher_prefix, news_windows))
     model.save_model(args.out)
 
     print(f"Saved model to {args.out}")
@@ -209,6 +259,8 @@ def main() -> None:
         print(f"  {key}: {value}")
     if args.higher_timeframe:
         print(f"  multi_timeframe: base={args.timeframe} higher={args.higher_timeframe}")
+    if news_articles is not None:
+        print(f"  news_features: {len(news_articles)} articles from {args.news_store}")
 
 
 if __name__ == "__main__":

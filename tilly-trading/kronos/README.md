@@ -17,11 +17,11 @@ one — either way, it needs its own MT5 terminal login (it does not go
 through the bridge).
 
 > **Tested against synthetic data, not real MT5 history.** `features.py`,
-> `labels.py`, `train.py`'s chronological split/training loop, and the
-> entire `backtest/` package have no MT5 dependency and are verified
+> `labels.py`, `train.py`'s chronological split/training loop, the entire
+> `backtest/` package, and `news/` have no MT5 dependency and are verified
 > end-to-end against synthetic OHLC data by a committed pytest suite
 > (`kronos/tests/` — run `pip install -r requirements.txt && pytest` from
-> inside `kronos/`; 75 tests as of this writing): no-lookahead checks
+> inside `kronos/`; 103 tests as of this writing): no-lookahead checks
 > (truncating future bars doesn't change past feature values), a
 > multi-timeframe merge check (never attaches a still-forming
 > higher-timeframe bar — see "Leakage audit" below), a labeling check
@@ -50,13 +50,19 @@ features.py  (indicators, pure pandas — testable anywhere)
 labels.py    (TP-before-SL outcome labels, only place that looks forward)
      |
      v
-train.py     (chronological split + LightGBM -> kronos_model.txt)
+collect_news.py + news/ (RSS -> local trained sentiment classifier ->
+     |     timestamp-safe features; optional --news-store input to both
+     |     train.py and infer.py below — see news/README.md)
+     v
+train.py     (chronological split + LightGBM -> kronos_model_buy.txt /
+     |         kronos_model_sell.txt — two models, one per side, not one
+     |         model's complement standing in for the other direction)
      |
      +--> backtest/ (Phase 3 — walk-forward retraining + realistic
      |     execution simulation -> reports/<timestamp>/report.html;
      |     see "Phase 3 — the realistic walk-forward backtester" below)
      v
-infer.py     (loads the model, polls live bars, predicts, publishes)
+infer.py     (loads both models, polls live bars, predicts, publishes)
      |
      v
 publish_signal.py  (writes one row to Supabase's `signals` table)
@@ -240,7 +246,7 @@ default — `spread.mode: historical`). All three are additive, not
 architectural, follow-ups.
 
 **Tested against synthetic data** (`kronos/tests/`, run with `pytest` from
-inside `kronos/`): 86 tests covering every module — no-lookahead checks on
+inside `kronos/`): 103 tests covering every module — no-lookahead checks on
 `features.py`/`train.py` (now actually committed here, not just run ad hoc
 during development), hand-constructed price paths with known TP/SL
 outcomes through the realistic execution simulator (spread/slippage/
@@ -299,13 +305,17 @@ BUY/SELL story above) — confirm each new symbol/config combination's first
   regression test proving the ungated path is untouched, plus tests for
   signal-only, news-only, and combined gating, against a real (in-memory)
   database, not mocks.
-- **The `news_events` table has no automatic feed** —
+- **The `news_events` table still has no automatic feed** —
   `tilly-trading/supabase/migrations/0008_news_events.sql` and
   `backend/app/services/news_filter.py` exist and are tested, but nothing
   populates the table yet; rows go in manually (or via a future script)
   using the service_role key. Wiring up a real economic-calendar API
-  (several exist, free and paid) is a deliberate follow-up requiring a
-  data-source decision, not something to guess at.
+  (several exist, free and paid) is still a deliberate follow-up requiring
+  a data-source decision, not something to guess at. **Not the same thing**
+  as `kronos/news/` (below) — that's article-text sentiment for Kronos's
+  own model, this is scheduled calendar events (NFP, CPI, rate decisions)
+  for pausing bot entries; two different data shapes, two different
+  purposes, don't conflate them.
 - **The trade-quality / expected-movement models** from the notes'
   three-model architecture — this is the single TP-before-SL direction
   model only (Model 3 from the notes, doing double duty).
@@ -313,10 +323,22 @@ BUY/SELL story above) — confirm each new symbol/config combination's first
   support/resistance levels from confirmed swing highs/lows (not lookahead
   — a swing needs `SWING_LAG` bars on both sides before it counts, so the
   most recent bars' swing status is genuinely unconfirmed, same as a human
-  reading a chart) and flags a breakout once price clears every recently
-  tracked level. This is a different thing from an LLM reading news
-  commentary and calling it "market structure" — see the LLM-narrative
-  discussion below.
+  reading a chart), plus "smart money concepts" style event features on
+  top of the same confirmed swings: break of structure (`bos_bull`/
+  `bos_bear`), change of character (`choch`), liquidity sweeps
+  (`liquidity_sweep_high`/`low`), and fair-value gaps (`fvg_bull`/`bear`).
+  A ChatGPT-authored reference implementation of these same concepts
+  (`kronos_lgbm_news_ai/features/structure.py`, reviewed alongside this
+  work) built its own separate pivot detector for BOS/CHoCH via
+  `.shift(left).rolling(left+right+1).max()`, which doesn't actually
+  implement a two-sided confirmed pivot — it compares each bar to a max
+  computed from an *earlier*, already-passed window, so it happens not to
+  leak future data but also doesn't detect what it claims to. This
+  implementation instead builds directly on the swing detector already
+  tested here, so there's one source of truth for "what counts as a
+  confirmed swing," not two that can silently drift apart. This is a
+  different thing from an LLM reading news commentary and calling it
+  "market structure" — see the LLM-narrative discussion below.
 
 ## On "reading the news like ChatGPT"
 
@@ -339,3 +361,32 @@ If an LLM-generated narrative signal source is wanted anyway, clearly
 labeled as unverified commentary and never a Kronos prediction, that's a
 separate, deliberate follow-up — not something to fold into this file
 silently.
+
+## News sentiment — a bounded, local, computed use (not narrative)
+
+`kronos/news/` (its own README has the full picture) turns article
+headlines into numerical features — count and sentiment in rolling time
+windows — using a **locally trained ML classifier** (TF-IDF + logistic
+regression via scikit-learn), not a cloud LLM. This is deliberately
+different from the "reading the news like ChatGPT" idea rejected above:
+Kronos never asks a model to read news and produce a trading opinion in
+prose. It asks a narrow, bounded question — "does this headline's text
+lean bullish or bearish, as a number" — the same way `features.py`'s
+technical indicators turn OHLC into numbers, and that number becomes one
+more input to the same LightGBM classifier trained on actual TP-before-SL
+outcomes, never a signal on its own.
+
+Also deliberately local rather than a paid API + cloud LLM (the approach
+platforms like Elirox/Trade Ideas actually use, per research reviewed
+alongside this decision): no subscription, no API key, nothing running
+outside this VPS — see `news/README.md`'s "Why local, not a paid API" for
+the tradeoff made explicitly, not by default, and how to swap in a paid
+API later if the local version isn't good enough.
+
+**Can't be backtested against history yet** — `news/README.md` explains
+why plainly: the collector only has forward coverage from whenever you
+first run it, so `backtest/walk_forward.py` deliberately doesn't use news
+features at all (a feature that's zero for 99% of history would look like
+"usually neutral," not "not covered yet," which would be misleading, not
+just premature). It's wired into `train.py --news-store` and
+`infer.py --news-store` for once real history has accumulated.
