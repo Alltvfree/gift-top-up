@@ -27,8 +27,12 @@ through the bridge).
 > looks like, since real leakage would show up as suspiciously *high* AUC
 > on data with no actual signal in it. `mt5_data.py` itself (the real MT5
 > IPC calls) could not be tested — no Windows machine or MT5 terminal
-> exists in this environment — same caveat as `bridge.py`. Confirm it
-> against your own broker/terminal before trusting a trained model.
+> exists in this environment — same caveat as `bridge.py`. `add-kronos.ps1`
+> was reviewed the same way as every other script in this project (checked
+> for balanced braces/parens, matches the exact Scheduled Task pattern
+> already field-verified in `mt5-bridge/`) but likewise not executed.
+> Confirm it against your own broker/terminal before trusting a trained
+> model.
 
 ## How the pieces fit together
 
@@ -57,41 +61,60 @@ publish_signal.py  (writes one row to Supabase's `signals` table)
           (backend/app/bots/grid_bot.py, dca_bot.py)
 ```
 
-## Setup
+## Setup: on the shared VPS (recommended, scripted)
 
-1. **Install MetaTrader 5** on a Windows machine/VPS and log in to your
-   broker account (same as `mt5-bridge/`'s setup — demo account first).
-2. `pip install -r requirements.txt`
-3. **Train a model:**
+Kronos runs on the same Windows VPS as your MT5 bridge clients
+(`../mt5-bridge/`), not a separate machine — it just needs its own isolated
+MT5 terminal copy, same reasoning as `add-client.ps1`: `MetaTrader5` can
+only attach to one terminal per process, so Kronos's process and a client's
+`bridge.py` process each need their own terminal instance to avoid
+colliding on the same IPC channel (a race that a lock *inside* one process,
+like `bridge.py`'s own `_mt5_lock`, can't prevent across two processes).
+
+1. **Run `../mt5-bridge/bootstrap-vps.ps1` first** if you haven't on this
+   VPS — installs Python. Kronos needs no Cloudflare tunnel (unlike a
+   bridge, nothing needs to reach it from the internet — it only makes
+   outbound calls to MT5 locally and to Supabase).
+2. **Copy this `kronos/` folder onto the VPS** (alongside `mt5-bridge/`).
+3. Run, as Administrator:
    ```powershell
-   python train.py --symbol XAUUSDm --timeframe M5 --bars 50000 --side BUY --tp 3.0 --sl 2.0 --out kronos_model.txt
+   .\add-kronos.ps1 -Mt5Login "414312080" -Mt5Password "..." -Mt5Server "Exness-MT5Real8" -MasterTerminalDir "C:\MT5-Master-Exness" -SupabaseUrl "https://vvkddynlfgilymzvugfo.supabase.co" -SupabaseServiceRoleKey "paste-the-service-role-secret-here"
    ```
-   This downloads 50,000 bars (chunked automatically — the "Invalid params"
-   bug from the notes is fixed by `mt5_data.py`'s `MAX_BARS_PER_REQUEST`
-   chunking, not by guessing your broker's exact undocumented cap), builds
-   features + TP-before-SL labels, does a 70/15/15 chronological
-   train/val/test split, and prints test AUC/accuracy. **A model this
-   simple (single chronological split, no walk-forward, no realistic
-   backtest with spread/slippage) is a first checkpoint, not something to
-   trade real money on** — see "What's not built yet" below.
-4. **Set Supabase credentials** for publishing (get the service_role key
-   from Supabase dashboard → Project Settings → API — not the anon key):
-   ```powershell
-   $env:SUPABASE_URL = "https://vvkddynlfgilymzvugfo.supabase.co"
-   $env:SUPABASE_SERVICE_ROLE_KEY = "paste-the-service-role-secret-here"
-   ```
-5. **Run live inference:**
-   ```powershell
-   python infer.py --model kronos_model.txt --symbol XAUUSDm --timeframe M5 --poll-seconds 60
-   ```
-   Every cycle it fetches recent bars, predicts, and publishes to Supabase.
-   Keep this running the same way as `bridge.py` (Task Scheduler,
-   `-LogonType Interactive`, same Session-0-IPC reasoning documented in
-   `mt5-bridge/README.md` — MT5's IPC only works inside a real desktop
-   session).
+   The MT5 login can be the same one a client's bridge already uses —
+   Kronos only reads candle history, never places orders, and its own
+   terminal copy keeps it off that bridge's IPC channel regardless. This
+   installs dependencies, clones an isolated terminal copy, and registers
+   (but does not start) a Scheduled Task for live inference.
+4. **Train a model** — a one-off, interactive step the script deliberately
+   doesn't run for you (it prints the exact command with your paths filled
+   in at the end): read the printed test AUC/accuracy before trusting it
+   with anything. **A model this simple (single chronological split, no
+   walk-forward, no realistic backtest with spread/slippage) is a first
+   checkpoint, not something to trade real money on** — see "What's not
+   built yet" below.
+5. **Start live inference** once a model file exists:
+   `Start-ScheduledTask -TaskName "TillyKronosInfer"`.
 6. **Check the Tilly app's Signals tab** — it reads directly from the
    `signals` table, so a successful publish shows up there within its
    15-second poll, no backend/redeploy needed.
+7. Same rule as every Scheduled Task on this VPS: **disconnect your RDP
+   client afterwards, don't log off** — logging off ends the session every
+   task on the box (bridges, tunnels, and now Kronos) runs inside.
+
+## Setup: standalone machine (manual)
+
+If Kronos runs somewhere other than the shared VPS, or you want to
+understand what `add-kronos.ps1` automates:
+
+1. Install MetaTrader 5 and log in to your broker account (demo first).
+2. `pip install -r requirements.txt`
+3. Train: `python train.py --symbol XAUUSDm --timeframe M5 --bars 50000 --side BUY --tp 3.0 --sl 2.0 --out kronos_model.txt`
+   — chunked download avoids the notes' "Invalid params" 100k-bar bug.
+4. Set credentials: `$env:SUPABASE_URL = "..."`, `$env:SUPABASE_SERVICE_ROLE_KEY = "..."`.
+5. Run inference: `python infer.py --model kronos_model.txt --symbol XAUUSDm --timeframe M5 --poll-seconds 60`
+   — keep it running the same way as `bridge.py` (Task Scheduler,
+   `-LogonType Interactive`; MT5's IPC only works inside a real desktop
+   session).
 
 ## The `signals` table
 
