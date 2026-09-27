@@ -134,9 +134,26 @@ or backend or get committed anywhere.
   metrics (AUC, accuracy), which the notes explicitly warn isn't enough:
   "A model can have good classification accuracy and still lose money
   after spread, slippage, commissions and bad risk management."
-- **Multi-timeframe features** — `features.merge_higher_timeframe()` exists
-  and is tested, but `train.py`/`infer.py` don't call it yet; they train on
-  one timeframe's own indicators only.
+- ~~**Multi-timeframe features**~~ — done: `train.py --higher-timeframe H1`
+  (or any timeframe) merges that timeframe's own features in via
+  `features.merge_higher_timeframe`, auto-computing how much higher-
+  timeframe history to download (`mt5_data.bars_to_cover_same_span`) so the
+  span matches the base timeframe's. `infer.py` takes the same
+  `--higher-timeframe` flag and must be given the same one used at
+  training time, or `predict()` fails loudly on a missing column rather
+  than silently mispredicting. Verified end-to-end against synthetic data:
+  no lookahead through the *full* pipeline (not just the merge function in
+  isolation), `model.feature_name()` matching what it was actually trained
+  on, and `infer.latest_signal()` correctly fetching and merging both
+  timeframes.
+  
+  First real result on live data, though: training BTCUSDm and XAUUSDm
+  both properly-scaled (TP/SL sized to each symbol's actual price level,
+  not copy-pasted dollar amounts) landed at `test_auc` ≈ 0.51 either way —
+  indistinguishable from chance, and true of the single-timeframe model
+  too. Multi-timeframe context is wired up and ready to test, but hasn't
+  yet been the thing that moves this number — that's still an open
+  question, not something this feature already answered.
 - ~~**Bot-side gating**~~ — done: a bot opts in with `require_signal: true`
   and/or `avoid_news_minutes: 30` in its parameters (checkboxes on the New
   Bot page), and only then checks `BaseBot.entry_allowed()` before opening

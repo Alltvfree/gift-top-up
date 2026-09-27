@@ -8,6 +8,11 @@ is a documented follow-up, not implemented here — this is Phase 1/2: a
 single chronological split, enough to tell whether the approach has any
 signal before investing in the rest of the roadmap.
 
+Optionally adds a higher timeframe's own features as context (--higher-
+timeframe), via features.merge_higher_timeframe — e.g. training on M5 with
+H1 features attached, so the model has some sense of the larger trend it's
+sitting inside, not just the base timeframe in isolation.
+
 Everything in this file operates on plain pandas DataFrames and has been
 tested against synthetic data (see the project's test suite) — it has no
 MT5 dependency itself. Only main()'s download step (mt5_data.py) does.
@@ -18,7 +23,7 @@ import lightgbm as lgb
 import pandas as pd
 from sklearn.metrics import accuracy_score, roc_auc_score
 
-from features import FEATURE_COLUMNS, compute_features
+from features import FEATURE_COLUMNS, compute_features, merge_higher_timeframe
 from labels import label_tp_before_sl
 
 
@@ -33,32 +38,70 @@ def chronological_split(
     return df.iloc[:train_end], df.iloc[train_end:val_end], df.iloc[val_end:]
 
 
+def feature_columns_for(higher_prefix: str | None) -> list[str]:
+    """The full feature-column list a dataset/model uses — base columns,
+    plus the higher-timeframe columns (same names, prefixed) if a higher
+    timeframe was merged in. Centralized here so prepare_dataset,
+    train_model, and infer.py's latest_signal all derive it the same way
+    instead of three copies of this string-building drifting apart."""
+    cols = list(FEATURE_COLUMNS)
+    if higher_prefix:
+        cols += [f"{higher_prefix}_{c}" for c in FEATURE_COLUMNS]
+    return cols
+
+
 def prepare_dataset(
     raw: pd.DataFrame,
     side: str,
     tp_distance: float,
     sl_distance: float,
     max_bars_forward: int = 50,
+    higher_raw: pd.DataFrame | None = None,
+    higher_prefix: str = "htf",
 ) -> pd.DataFrame:
     """raw: OHLC bars (see mt5_data.download_history's output shape).
+    higher_raw: optionally, a second, higher timeframe's own OHLC bars
+    covering the same (or a wider) span — its features get merged in via
+    merge_higher_timeframe, prefixed with `higher_prefix`.
+
     Returns feature columns + a `label` column, with rows dropped wherever
     either isn't available (early rows before indicators have enough
-    history; trailing rows whose trade outcome isn't resolved yet)."""
+    history; trailing rows whose trade outcome isn't resolved yet; and —
+    with a higher timeframe — the leading rows before it has any confirmed
+    bar to attach yet either).
+    """
+    raw = raw.reset_index(drop=True)
+    labels = label_tp_before_sl(raw, tp_distance, sl_distance, side, max_bars_forward).reset_index(
+        drop=True
+    )
+
     feats = compute_features(raw)
-    feats["label"] = label_tp_before_sl(raw, tp_distance, sl_distance, side, max_bars_forward)
-    return feats.dropna(subset=[*FEATURE_COLUMNS, "label"]).reset_index(drop=True)
+    if higher_raw is not None:
+        higher_feats = compute_features(higher_raw.reset_index(drop=True))
+        feats = merge_higher_timeframe(feats, higher_feats, prefix=higher_prefix)
+
+    # merge_asof (inside merge_higher_timeframe) re-sorts by time and can
+    # hand back a fresh index — reset explicitly and assign the label by
+    # position (.values), not by index-label alignment, so there's no
+    # chance of a silent misalignment between labels and their rows.
+    feats = feats.reset_index(drop=True)
+    feats["label"] = labels.values
+
+    cols = feature_columns_for(higher_prefix if higher_raw is not None else None)
+    return feats.dropna(subset=[*cols, "label"]).reset_index(drop=True)
 
 
 def train_model(
-    dataset: pd.DataFrame, params: dict | None = None
+    dataset: pd.DataFrame, feature_columns: list[str] | None = None, params: dict | None = None
 ) -> tuple[lgb.Booster, dict]:
+    feature_columns = feature_columns or FEATURE_COLUMNS
     train_df, val_df, test_df = chronological_split(dataset)
     if len(train_df) == 0 or len(val_df) == 0 or len(test_df) == 0:
         raise ValueError("Not enough rows to split into train/val/test — need more history.")
 
-    x_train, y_train = train_df[FEATURE_COLUMNS], train_df["label"]
-    x_val, y_val = val_df[FEATURE_COLUMNS], val_df["label"]
-    x_test, y_test = test_df[FEATURE_COLUMNS], test_df["label"]
+    x_train, y_train = train_df[feature_columns], train_df["label"]
+    x_val, y_val = val_df[feature_columns], val_df["label"]
+    x_test, y_test = test_df[feature_columns], test_df["label"]
 
     lgb_params = {
         "objective": "binary",
@@ -96,12 +139,18 @@ def train_model(
 def main() -> None:
     import argparse
 
-    from mt5_data import connect, disconnect, download_history
+    from mt5_data import bars_to_cover_same_span, connect, disconnect, download_history
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--symbol", default="XAUUSDm")
     parser.add_argument("--timeframe", default="M5")
     parser.add_argument("--bars", type=int, default=50000)
+    parser.add_argument(
+        "--higher-timeframe",
+        default=None,
+        help="e.g. H1 - adds that timeframe's own features as context (see "
+        "features.merge_higher_timeframe). Omit to train on --timeframe alone.",
+    )
     parser.add_argument("--side", choices=["BUY", "SELL"], default="BUY")
     parser.add_argument("--tp", type=float, default=3.0, help="Take-profit distance in price units.")
     parser.add_argument("--sl", type=float, default=2.0, help="Stop-loss distance in price units.")
@@ -109,19 +158,35 @@ def main() -> None:
     parser.add_argument("--out", default="kronos_model.txt")
     args = parser.parse_args()
 
+    higher_prefix = args.higher_timeframe.lower() if args.higher_timeframe else None
+
     connect()
     try:
         raw = download_history(args.symbol, args.timeframe, args.bars)
+        higher_raw = None
+        if args.higher_timeframe:
+            higher_bars = bars_to_cover_same_span(args.timeframe, args.bars, args.higher_timeframe)
+            higher_raw = download_history(args.symbol, args.higher_timeframe, higher_bars)
     finally:
         disconnect()
 
-    dataset = prepare_dataset(raw, args.side, args.tp, args.sl, args.max_bars_forward)
-    model, metrics = train_model(dataset)
+    dataset = prepare_dataset(
+        raw,
+        args.side,
+        args.tp,
+        args.sl,
+        args.max_bars_forward,
+        higher_raw=higher_raw,
+        higher_prefix=higher_prefix or "htf",
+    )
+    model, metrics = train_model(dataset, feature_columns=feature_columns_for(higher_prefix))
     model.save_model(args.out)
 
     print(f"Saved model to {args.out}")
     for key, value in metrics.items():
         print(f"  {key}: {value}")
+    if args.higher_timeframe:
+        print(f"  multi_timeframe: base={args.timeframe} higher={args.higher_timeframe}")
 
 
 if __name__ == "__main__":

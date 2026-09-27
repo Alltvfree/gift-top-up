@@ -35,6 +35,27 @@ TIMEFRAME_MAP = {
     "H4": mt5.TIMEFRAME_H4,
 }
 
+TIMEFRAME_MINUTES = {"M1": 1, "M5": 5, "M15": 15, "H1": 60, "H4": 240}
+
+
+def bars_to_cover_same_span(
+    base_timeframe: str, base_bars: int, target_timeframe: str, buffer: float = 1.1
+) -> int:
+    """How many `target_timeframe` bars are needed to cover the same
+    historical wall-clock span as `base_bars` bars of `base_timeframe` —
+    so a caller adding multi-timeframe context (see
+    features.merge_higher_timeframe) doesn't have to do the minutes
+    arithmetic by hand each time. `buffer` adds a small margin so the
+    higher timeframe's earliest bar comfortably predates the base
+    timeframe's earliest bar, not lands right at the edge of it.
+    """
+    base_minutes = TIMEFRAME_MINUTES.get(base_timeframe.upper())
+    target_minutes = TIMEFRAME_MINUTES.get(target_timeframe.upper())
+    if base_minutes is None or target_minutes is None:
+        raise ValueError(f"Unknown timeframe in {base_timeframe!r}/{target_timeframe!r}")
+    span_minutes = base_bars * base_minutes
+    return int(span_minutes / target_minutes * buffer) + 10
+
 # Conservative and well under any broker's documented or observed limit —
 # chunking at this size sidesteps needing to know the exact undocumented
 # cap for a given terminal/broker.
