@@ -73,7 +73,13 @@ KNOWN_SYMBOLS: dict[str, SymbolSpec] = {
 
 
 def get_symbol_spec(symbol: str) -> SymbolSpec:
-    spec = KNOWN_SYMBOLS.get(symbol.upper())
+    key = symbol.upper()
+    spec = KNOWN_SYMBOLS.get(key)
+    if spec is None and not key.endswith("M"):
+        # A real (non-"m"-suffixed) account names the same instrument
+        # "XAUUSD"/"BTCUSD" — same contract, so reuse the defaults. Pass
+        # --spec-from-mt5 to replace these with the account's own values.
+        spec = KNOWN_SYMBOLS.get(key + "M")
     if spec is None:
         raise ValueError(
             f"No SymbolSpec for {symbol!r}. Known: {sorted(KNOWN_SYMBOLS)}. "

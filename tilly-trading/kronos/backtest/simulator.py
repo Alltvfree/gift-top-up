@@ -85,6 +85,16 @@ def _resolve_same_bar(policy: str, rng: np.random.Generator) -> str:
     raise ValueError(f"Unknown same_bar_exit_policy {policy!r}")
 
 
+def _daily_limit_hit(risk, account: Account, day_start_balance: float, trades_today: int) -> bool:
+    if risk.max_trades_per_day and trades_today >= risk.max_trades_per_day:
+        return True
+    if risk.max_daily_loss_percent and day_start_balance > 0:
+        lost = day_start_balance - account.balance
+        if lost >= day_start_balance * risk.max_daily_loss_percent / 100.0:
+            return True
+    return False
+
+
 def run_simulation(
     test_df: pd.DataFrame,
     cfg: BacktestConfig,
@@ -101,6 +111,11 @@ def run_simulation(
     why this must NOT be a single probability with a complementary
     threshold). Mutates `account` in place (realized balance + a
     mark-to-market point per bar) and returns the list of closed trades.
+
+    Optional columns signal_sl_distance / signal_tp_distance (price units,
+    read from the SIGNAL bar) override the config's fixed SL/TP for that one
+    trade — how a rule-based setup supplies its own structural stop and
+    risk:reward target. Position size then follows that trade's own SL.
     """
     required = {
         "time", "open", "high", "low", "close",
@@ -115,21 +130,36 @@ def run_simulation(
     n = len(test_df)
     rows = test_df.reset_index(drop=True)
 
-    tp_distance = _take_profit_distance(cfg, spec)
-    sl_distance = _stop_loss_distance(cfg, spec)
+    default_tp_distance = _take_profit_distance(cfg, spec)
+    default_sl_distance = _stop_loss_distance(cfg, spec)
+    has_signal_distances = {"signal_sl_distance", "signal_tp_distance"} <= set(rows.columns)
 
     i = 0
     cooldown_until = -1
+    current_day = None
+    day_start_balance, trades_today = account.balance, 0
     while i < n:
         bar = rows.iloc[i]
         prob_buy, prob_sell = bar["predicted_probability_buy"], bar["predicted_probability_sell"]
 
+        bar_day = bar["time"].date()
+        if bar_day != current_day:
+            current_day, day_start_balance, trades_today = bar_day, account.balance, 0
+
         opened = False
-        if i > cooldown_until and pd.notna(prob_buy) and pd.notna(prob_sell):
+        if (
+            i > cooldown_until and pd.notna(prob_buy) and pd.notna(prob_sell)
+            and not _daily_limit_hit(cfg.risk, account, day_start_balance, trades_today)
+        ):
             side = decide_side(float(prob_buy), float(prob_sell), cfg.signal)
             if side != "NO_TRADE":
                 probability = float(prob_buy) if side == "BUY" else float(prob_sell)
                 entry_idx = i + 1 if cfg.execution.next_bar else i
+                tp_distance, sl_distance = default_tp_distance, default_sl_distance
+                if has_signal_distances:
+                    sig_sl, sig_tp = bar["signal_sl_distance"], bar["signal_tp_distance"]
+                    if pd.notna(sig_sl) and pd.notna(sig_tp) and sig_sl > 0 and sig_tp > 0:
+                        sl_distance, tp_distance = float(sig_sl), float(sig_tp)
                 if entry_idx < n:
                     opened = _open_and_scan(
                         rows, entry_idx, side, probability, bar["time"],
@@ -138,6 +168,7 @@ def run_simulation(
                     )
                     if opened:
                         cooldown_until = opened + cfg.signal.cooldown_bars
+                        trades_today += 1
 
         if not opened:
             account.mark(bar["time"], 0.0, 0)

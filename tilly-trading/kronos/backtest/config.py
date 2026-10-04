@@ -54,6 +54,11 @@ class RiskConfig:
     fixed_money: float = 10.0
     fixed_lot: float = 0.01
     max_lot: float = 5.0
+    # Daily circuit breakers, both off at 0. max_daily_loss_percent is
+    # measured from the balance at the first bar evaluated that UTC day: once
+    # that much has been lost, no new entries until the next day.
+    max_trades_per_day: int = 0
+    max_daily_loss_percent: float = 0.0
 
 
 @dataclass

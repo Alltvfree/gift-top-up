@@ -21,7 +21,7 @@ through the bridge).
 > `backtest/` package, and `news/` have no MT5 dependency and are verified
 > end-to-end against synthetic OHLC data by a committed pytest suite
 > (`kronos/tests/` — run `pip install -r requirements.txt && pytest` from
-> inside `kronos/`; 103 tests as of this writing): no-lookahead checks
+> inside `kronos/`; 169 tests as of this writing): no-lookahead checks
 > (truncating future bars doesn't change past feature values), a
 > multi-timeframe merge check (never attaches a still-forming
 > higher-timeframe bar — see "Leakage audit" below), a labeling check
@@ -246,7 +246,7 @@ default — `spread.mode: historical`). All three are additive, not
 architectural, follow-ups.
 
 **Tested against synthetic data** (`kronos/tests/`, run with `pytest` from
-inside `kronos/`): 103 tests covering every module — no-lookahead checks on
+inside `kronos/`): 169 tests covering every module — no-lookahead checks on
 `features.py`/`train.py` (now actually committed here, not just run ad hoc
 during development), hand-constructed price paths with known TP/SL
 outcomes through the realistic execution simulator (spread/slippage/
@@ -261,6 +261,65 @@ a live terminal in this repo's own CI — it has, however, now been run for
 real against live BTCUSDm history on the project's own VPS (see the
 BUY/SELL story above) — confirm each new symbol/config combination's first
 `--quick` run before trusting a `--full` one.
+
+## Rule-based setup — trend + pullback on gold
+
+Why this exists: the LightGBM models trained on XAUUSDm/BTCUSDm came out at
+AUC ~0.52-0.55 — barely better than a coin flip — and "ML predicts BUY/SELL"
+was built before there was any tested strategy underneath it. This is the
+other order: one explicit setup with a predefined stop and target, judged
+by a backtest that refuses to flatter it. ML's later job, if the setup
+shows an edge, is filtering which of ITS trades to take — not inventing
+entries.
+
+**The rules** (`setups/trend_pullback.py`, parameters in the `[setup]`
+table of `config/setup_xauusd.toml`, fixed before any run): H1 trend up
+(confirmed HH+HL and price above its EMA 50) -> M15 price pulls back and
+tags the EMA 20 -> a strong bullish candle closes back above the EMA 20 AND
+the previous bar's high. Stop just past the pullback's extreme (rejected if
+tighter than 0.8 or wider than 2.5 ATR), target 2R. Shorts are the mirror
+(a test proves it). No trade outside 07-20 broker-server hours, late
+Friday, in a dead or spiking market (ATR vs its 100-bar average), or when
+spread eats >15% of ATR. Max 3 trades/day and a 3% daily loss stop. Every
+input is lookahead-safe (a test truncates the history and checks the
+signals don't change).
+
+**Backtest it** (Windows VPS, MT5 open, from inside `kronos/`):
+
+```
+python -m backtest.setup_backtest --config config/setup_xauusd.toml
+python -m backtest.setup_backtest --config config/setup_xauusd.toml --symbol XAUUSD --spec-from-mt5   # real account
+```
+
+It runs the same execution engine as the ML backtester (historical spread,
+slippage, commission, next-bar-open entry, conservative same-bar exits,
+risk-based sizing off each trade's own stop) and writes `reports/setup/
+latest/report.html`: expectancy in R with a bootstrap 95% CI, win rate vs
+its break-even, profit factor, drawdown, worst losing streak, and
+breakdowns by direction/session/weekday/month/first-vs-second half. The
+verdict is one of NO VERDICT (under 500 trades — the default), NEGATIVE
+EXPECTANCY, NO EDGE DEMONSTRATED (CI includes zero), or POSITIVE EXPECTANCY
+SUPPORTED (CI above zero and net profit positive). `--bars` controls
+history (50,000 M15 bars is roughly two years if your terminal holds it).
+**Protocol:** run it once. If you change `[setup]` after seeing the result,
+you are curve-fitting and the verdict no longer applies. News events are
+not segmented — there is no historical economic calendar in the backtest.
+
+**Run it live, informationally** (`setup_live.py`): on each newly closed
+M15 bar it applies the same rules and publishes BUY/SELL/NO_TRADE with stop
+and target prices to the `signals` table as `source = "setup"` (the Signals
+page shows RULES, not a confidence, for these). It mirrors the backtest's
+one-position/cooldown/daily-cap behavior with a hypothetical position
+tracker, keeps its state in `setup_state.json`, and uses only closed bars.
+It places no orders. Run it like `infer.py`: an at-logon Scheduled Task on
+the VPS. Gate nothing real on it until the backtest verdict and a demo
+period say it deserves that.
+
+Known issue, not fixed here: MT5's `copy_rates_from_pos(.., 0, ..)` returns
+the still-forming bar as its last row, and `infer.py` (the ML signals)
+still predicts from it. `bars.closed_bars_only` + `mt5_data.server_time_now`
+are the fix and are already used by the setup code; applying them to
+`infer.py` is a separate change.
 
 ## What's not built yet (see the notes' own phased roadmap)
 

@@ -1,0 +1,82 @@
+# Rule-based trend-pullback setup on gold (setups/trend_pullback.py).
+#   python -m backtest.setup_backtest --config config/setup_xauusd.toml
+# Demo/mini account symbol is XAUUSDm; a real account is plain XAUUSD — pass
+# --symbol XAUUSD (and ideally --spec-from-mt5) on the VPS for that.
+#
+# Rules below were set BEFORE running any backtest and are not tuned. Do not
+# edit [setup] after looking at a result and re-run expecting the verdict to
+# still mean anything — that is curve-fitting.
+
+symbol = "XAUUSDm"
+timeframe = "M15"
+higher_timeframe = "H1"
+initial_balance = 10000
+currency = "USD"
+random_seed = 42
+
+[signal]
+# The setup emits 1.0/0.0, so any threshold in (0, 1] means "the rules fired".
+buy_threshold = 0.5
+sell_threshold = 0.5
+cooldown_bars = 3
+max_positions = 1
+trade_buy = true
+trade_sell = true
+
+[risk]
+mode = "percent_equity"
+risk_percent = 1.0
+fixed_money = 10.0
+fixed_lot = 0.01
+max_lot = 5.0
+# Roadmap rules: "maximum trades per day? maximum daily loss?"
+max_trades_per_day = 3
+max_daily_loss_percent = 3.0
+
+# Fallback only — the setup supplies its own structural stop and 2R target per
+# trade (signal_sl_distance / signal_tp_distance), which override these.
+[stop_loss]
+type = "price"
+value = 4.0
+
+[take_profit]
+type = "price"
+value = 8.0
+
+[spread]
+mode = "historical"   # MT5's own recorded spread per bar
+points = 25
+percent = 0.02
+
+[slippage]
+mode = "fixed_points"
+points = 5.0          # $0.05 on gold, deliberately not optimistic
+random_std_points = 2.0
+
+[commission]
+type = "per_lot"
+value = 3.5           # confirm against your account type; standard accounts may be 0
+
+[execution]
+next_bar = true
+same_bar_exit_policy = "conservative"
+max_holding_bars = 64   # 16h on M15
+
+[setup]
+higher_prefix = "h1"
+require_htf_structure = true
+ema_fast = 20
+ema_slow = 50
+pullback_bars = 8
+min_body_pct = 0.5
+sl_buffer_atr = 0.25
+min_sl_atr = 0.8
+max_sl_atr = 2.5
+rr = 2.0
+session_start_utc = 7
+session_end_utc = 20
+friday_cutoff_utc = 19
+atr_ratio_min = 0.6
+atr_ratio_max = 2.5
+atr_ratio_window = 100
+max_spread_atr_fraction = 0.15

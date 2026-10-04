@@ -208,6 +208,91 @@ def test_spread_slippage_and_commission_all_reduce_net_pnl():
     assert costly.net_pnl < zero_cost.net_pnl
 
 
+def test_per_signal_distances_override_config_and_drive_position_size():
+    n = 5
+    df = _bars(
+        {"open": [100, 100, 100, 100, 100], "high": [100, 101.5, 100, 100, 100],
+         "low": [100, 99.8, 100, 100, 100], "close": [100, 100, 100, 100, 100]},
+        n, buy_probability_at_0=0.9, sell_probability_at_0=0.0,
+    )
+    df["signal_sl_distance"] = np.nan
+    df["signal_tp_distance"] = np.nan
+    df.loc[0, "signal_sl_distance"] = 0.5   # config says 2.0 — the signal's own, tighter stop must win
+    df.loc[0, "signal_tp_distance"] = 1.0   # config says 3.0 — reachable at bar1's 101.5 high
+    cfg = _zero_cost_cfg(risk=RiskConfig(mode="fixed_money", fixed_money=50.0))
+    trades = run_simulation(df, cfg, spec, Account(10000.0), window_index=0)
+    t = trades[0]
+    assert t.exit_reason == "TP"
+    assert t.take_profit == pytest.approx(101.0) and t.stop_loss == pytest.approx(99.5)
+    # $50 risk / ($0.50 stop * 100 oz per lot) = 1.0 lot, sized off the signal's OWN stop
+    assert t.lots == pytest.approx(1.0)
+    assert t.gross_pnl == pytest.approx(100.0)
+
+
+def test_max_trades_per_day_blocks_further_entries_that_day():
+    n = 12
+    prob_buy = np.full(n, np.nan)
+    prob_sell = np.full(n, np.nan)
+    for i in (0, 3, 6):
+        prob_buy[i], prob_sell[i] = 0.9, 0.0
+    df = pd.DataFrame(
+        {
+            "time": pd.date_range("2024-01-01", periods=n, freq="5min", tz="UTC"),
+            "open": [100] * n, "high": [104] * n, "low": [99.5] * n, "close": [103] * n,
+            "spread": [0] * n,
+            "predicted_probability_buy": prob_buy, "predicted_probability_sell": prob_sell,
+        }
+    )
+    cfg = _zero_cost_cfg()
+    cfg.risk.max_trades_per_day = 2
+    trades = run_simulation(df, cfg, spec, Account(10000.0), window_index=0)
+    assert len(trades) == 2, "the third signal the same UTC day must be refused"
+
+
+def test_max_daily_loss_blocks_entries_after_the_limit_is_hit():
+    n = 12
+    prob_buy = np.full(n, np.nan)
+    prob_sell = np.full(n, np.nan)
+    for i in (0, 4, 8):
+        prob_buy[i], prob_sell[i] = 0.9, 0.0
+    # Every trade enters at 100 and its entry bar's low (97) hits the SL at 98.
+    df = pd.DataFrame(
+        {
+            "time": pd.date_range("2024-01-01", periods=n, freq="5min", tz="UTC"),
+            "open": [100] * n, "high": [100.5] * n, "low": [97] * n, "close": [100] * n,
+            "spread": [0] * n,
+            "predicted_probability_buy": prob_buy, "predicted_probability_sell": prob_sell,
+        }
+    )
+    cfg = _zero_cost_cfg(risk=RiskConfig(mode="fixed_lot", fixed_lot=1.0))
+    cfg.risk.max_daily_loss_percent = 1.5  # one -$200 loss on $10,000 is 2% -> done for the day
+    trades = run_simulation(df, cfg, spec, Account(10000.0), window_index=0)
+    assert len(trades) == 1
+
+
+def test_daily_limits_reset_on_the_next_utc_day():
+    times = list(pd.date_range("2024-01-01 23:00", periods=4, freq="5min", tz="UTC")) + list(
+        pd.date_range("2024-01-02 00:00", periods=4, freq="5min", tz="UTC")
+    )
+    n = len(times)
+    prob_buy = np.full(n, np.nan)
+    prob_sell = np.full(n, np.nan)
+    prob_buy[0], prob_sell[0] = 0.9, 0.0   # day 1
+    prob_buy[5], prob_sell[5] = 0.9, 0.0   # day 2
+    df = pd.DataFrame(
+        {
+            "time": times,
+            "open": [100] * n, "high": [104] * n, "low": [99.5] * n, "close": [103] * n,
+            "spread": [0] * n,
+            "predicted_probability_buy": prob_buy, "predicted_probability_sell": prob_sell,
+        }
+    )
+    cfg = _zero_cost_cfg()
+    cfg.risk.max_trades_per_day = 1
+    trades = run_simulation(df, cfg, spec, Account(10000.0), window_index=0)
+    assert len(trades) == 2
+
+
 def test_signal_bar_own_future_ohlc_does_not_change_the_entry_price():
     """Execution-timing check (Phase 13): the entry price is fixed by bar1's
     open the instant a signal fires at bar0 — changing bar0's OWN high/low

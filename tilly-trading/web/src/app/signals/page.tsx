@@ -13,6 +13,12 @@ export default function SignalsPage() {
   );
 }
 
+// A rule-based setup has no probability behind it, so showing "CONF 100%"
+// for it would read as certainty it doesn't have.
+function confidenceLabel(s: SignalRow): string {
+  return s.source === "setup" ? "RULES" : `CONF ${s.confidence}%`;
+}
+
 function Signals() {
   const [signals, setSignals] = useState<SignalRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,7 +74,7 @@ function Signals() {
               >
                 {latest.symbol} {latest.side}
               </span>
-              <span className="mb-1 font-mono text-xs text-amber">CONF {latest.confidence}%</span>
+              <span className="mb-1 font-mono text-xs text-amber">{confidenceLabel(latest)}</span>
             </div>
             <div className="mt-3 grid grid-cols-3 gap-2 border-t border-line/70 pt-3 text-center">
               <div>
@@ -132,7 +138,7 @@ function Signals() {
                       >
                         {s.side}
                       </span>
-                      <span className="font-mono text-[10px] text-amber">CONF {s.confidence}%</span>
+                      <span className="font-mono text-[10px] text-amber">{confidenceLabel(s)}</span>
                     </div>
                     {s.note && <div className="mt-1 text-[11px] text-muted">{s.note}</div>}
                   </div>

@@ -47,8 +47,11 @@ def publish_signal(
     sl: float | None = None,
     expected_move: float | None = None,
     note: str = "",
+    source: str = "kronos",
 ) -> None:
-    """side: "BUY" | "SELL" | "NO_TRADE". confidence: 0-100."""
+    """side: "BUY" | "SELL" | "NO_TRADE". confidence: 0-100. source tells the
+    UI which generator wrote the row ("kronos" = ML probability, "setup" =
+    rule-based setup with no probability behind it)."""
     if side.upper() not in ("BUY", "SELL", "NO_TRADE"):
         raise ValueError(f"side must be BUY, SELL, or NO_TRADE, got {side!r}")
     _get_client().table("signals").insert(
@@ -61,6 +64,6 @@ def publish_signal(
             "sl": sl,
             "expected_move": expected_move,
             "note": note,
-            "source": "kronos",
+            "source": source,
         }
     ).execute()

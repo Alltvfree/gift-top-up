@@ -44,3 +44,6 @@ Thumbs.db
 kronos/news/models/*.joblib
 kronos/news/data/*.jsonl
 kronos/reports/
+
+# Live setup runner state (hypothetical open signal, daily count)
+kronos/setup_state.json

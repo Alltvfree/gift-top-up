@@ -84,6 +84,21 @@ def disconnect() -> None:
     mt5.shutdown()
 
 
+def server_time_now(symbol: str) -> pd.Timestamp:
+    """The broker server's current time, from the symbol's latest tick, as a
+    tz-aware UTC-labelled Timestamp — the SAME clock download_history stamps
+    on bars (it labels the server's epoch seconds as UTC). Use this, not the
+    PC clock, to decide whether a bar has closed (bars.closed_bars_only).
+    Over a weekend the last tick is stale, which is correct: nothing new has
+    closed either."""
+    if not mt5.symbol_select(symbol, True):
+        raise RuntimeError(f"Could not select {symbol} in Market Watch: {mt5.last_error()}")
+    tick = mt5.symbol_info_tick(symbol)
+    if tick is None:
+        raise RuntimeError(f"No tick available for {symbol}: {mt5.last_error()}")
+    return pd.Timestamp(tick.time, unit="s", tz="UTC")
+
+
 def download_history(symbol: str, timeframe: str, total_bars: int) -> pd.DataFrame:
     """Download the most recent `total_bars` closed bars for `symbol`,
     chunked to avoid the undocumented per-request cap. Walks backward from

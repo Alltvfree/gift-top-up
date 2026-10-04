@@ -19,6 +19,14 @@ def test_round_volume_respects_min_max_step():
     assert abs(steps - round(steps)) < 1e-9, "rounded volume must land on a volume_step multiple"
 
 
+def test_real_account_symbol_without_suffix_resolves():
+    real = get_symbol_spec("XAUUSD")
+    demo = get_symbol_spec("XAUUSDm")
+    assert real.symbol == "XAUUSD"
+    assert (real.contract_size, real.point, real.tick_value) == (demo.contract_size, demo.point, demo.tick_value)
+    assert get_symbol_spec("BTCUSD").symbol == "BTCUSD"
+
+
 def test_unknown_symbol_raises():
     try:
         get_symbol_spec("NOT_A_REAL_SYMBOL")
