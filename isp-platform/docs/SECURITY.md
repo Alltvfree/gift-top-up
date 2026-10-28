@@ -20,6 +20,23 @@ Known gaps to close before calling it production: off-site encrypted DB backups 
 HA for RADIUS (second FreeRADIUS on another island/site), log shipping, and SNMPv3 instead of v2c.
 PPPoE passwords stay in `radcheck` as cleartext because CHAP/MS-CHAPv2 need them; protect the database accordingly.
 
+## Threat protection (network-wide blocklist)
+Every poll (1 min) the worker reads new `login failure for user … from <IP> via winbox|ssh|api` lines from each
+MikroTik's log. A public IP with `THREAT_FAILURES` failures within `THREAT_WINDOW_MIN` is blocked on **all**
+MikroTiks for `THREAT_BLOCK_HOURS`; once `THREAT_SUBNET_AFTER` addresses of one /24 are blocked (bots rotating through a
+range) the whole /24 is blocked instead. Blocks are pushed to each router's `blocklist` address list, tagged
+`isp-block:`; the platform never adds or removes entries without that tag.
+
+Safety rails: private, CGNAT, loopback and documentation ranges are never auto-blocked (an attack from inside raises an
+alert instead: infected customer device or misconfigured tool); neither are `THREAT_NEVER_BLOCK`, any device's
+management IP or any RADIUS client, even manually; nothing larger than a /16 can be blocked; auto-blocks expire.
+
+A router only *drops* the list if it has a rule for it. The generated firewall includes one; for other routers
+*Threat protection → Enable* creates a one-rule change request (four-eyes approval, auto-rollback like any change):
+`/ip firewall raw add chain=prerouting action=drop src-address-list=blocklist`.
+
+Blocking addresses is a second line of defence. The first is that Winbox/SSH/API must not answer on WAN at all.
+
 ## Network (generated RouterOS firewall)
 * Management (SSH, Winbox, REST, SNMP) only from your management networks and the platform; telnet/FTP/HTTP/API off.
 * Brute-force (staged address lists) and port-scan (PSD) sources go to a 1-day blocklist dropped in RAW.

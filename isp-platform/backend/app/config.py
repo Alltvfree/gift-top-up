@@ -41,3 +41,13 @@ COMMIT_CONFIRM_MINUTES = _int("COMMIT_CONFIRM_MINUTES", 5)
 # Two-factor: roles that must enrol TOTP before they can use anything else (comma separated).
 MFA_REQUIRED_ROLES = {r.strip() for r in os.environ.get("MFA_REQUIRED_ROLES", "admin").split(",") if r.strip()}
 MFA_ISSUER = os.environ.get("MFA_ISSUER", "SatLink")
+
+# Threat protection: block sources of repeated failed router logins on every MikroTik.
+THREAT_AUTO_BLOCK = os.environ.get("THREAT_AUTO_BLOCK", "true").lower() == "true"
+THREAT_FAILURES = _int("THREAT_FAILURES", 5)              # failed logins from one IP ...
+THREAT_WINDOW_MIN = _int("THREAT_WINDOW_MIN", 30)         # ... within this many minutes
+THREAT_BLOCK_HOURS = _int("THREAT_BLOCK_HOURS", 168)      # auto-blocks expire (7 days)
+THREAT_SUBNET_AFTER = _int("THREAT_SUBNET_AFTER", 3)      # this many blocked IPs in one /24 -> block the /24
+# Never auto-blocked (your NOC, VPN, upstream...). Private/CGNAT ranges are never auto-blocked either:
+# an attack from inside raises an alert instead, so a customer or a NOC PC is never cut off by a script.
+THREAT_NEVER_BLOCK = [n.strip() for n in os.environ.get("THREAT_NEVER_BLOCK", "").split(",") if n.strip()]

@@ -89,6 +89,49 @@ class RouterOS:
                 snap[key] = {"error": str(exc)}
         return snap
 
+    # ---- threat protection
+    def login_failures(self, cursor: int | None) -> tuple[list[dict], int | None]:
+        """Failed Winbox/SSH/API logins logged since `cursor` (the numeric log .id)."""
+        try:
+            rows = self._req("POST", "log/print", {".proplist": [".id", "message"], ".query": ["topics=system,error,critical"]})
+        except RouterOSError:
+            rows = self.get("log?.proplist=.id,message")  # older v7 builds without query support
+        ids = [int(r[".id"].lstrip("*"), 16) for r in rows if r.get(".id")]
+        top = max(ids) if ids else cursor
+        if cursor is not None and top is not None and top < cursor:
+            cursor = None  # log restarted (reboot / cleared): read it all again
+        events = []
+        for r in rows:
+            n = int(r[".id"].lstrip("*"), 16)
+            if cursor is not None and n <= cursor:
+                continue
+            m = LOGIN_FAILURE.search(r.get("message", ""))
+            if m:
+                events.append({"src_ip": m["ip"], "username": m["user"][:64], "via": m["via"][:16],
+                               "message": r["message"][:300]})
+        return events, top
+
+    def blocklist_entries(self) -> list[dict]:
+        return self.get("ip/firewall/address-list?list=blocklist")
+
+    def blocklist_add(self, address: str, timeout_s: int | None, comment: str):
+        body = {"list": "blocklist", "address": address, "comment": comment}
+        if timeout_s:
+            body["timeout"] = ros_duration(timeout_s)
+        self._req("PUT", "ip/firewall/address-list", body)
+
+    def blocklist_remove(self, item_id: str):
+        self._req("DELETE", f"ip/firewall/address-list/{item_id}")
+
+    def blocklist_enforced(self) -> bool:
+        """True if some enabled RAW-prerouting or input-filter rule drops src-address-list=blocklist."""
+        for path, chains in (("ip/firewall/raw", ("prerouting",)), ("ip/firewall/filter", ("input",))):
+            for r in self.get(path):
+                if (r.get("src-address-list") == "blocklist" and r.get("action") == "drop"
+                        and r.get("chain") in chains and r.get("disabled") != "true"):
+                    return True
+        return False
+
     # ---- change application with commit-confirm
     def apply_with_commit_confirm(self, change_id: int, script: str, confirm_minutes: int, reachable_check) -> str:
         """Back up, arm an auto-restore, apply, then disarm only if the router is still reachable.
@@ -120,6 +163,16 @@ class RouterOS:
         self.run_script(f'/system scheduler remove [find name={name}]')
         log.append("router reachable; auto-rollback disarmed")
         return "\n".join(log)
+
+
+LOGIN_FAILURE = re.compile(r"login failure for user (?P<user>.*?) from (?P<ip>[0-9A-Fa-f:.]+) via (?P<via>\S+)")
+
+
+def ros_duration(seconds: int) -> str:
+    """Seconds -> RouterOS time ('6d23h59m')."""
+    d, rem = divmod(max(int(seconds), 60), 86400)
+    h, rem = divmod(rem, 3600)
+    return f"{d}d{h}h{rem // 60}m" if d else f"{h}h{rem // 60}m"
 
 
 def parse_uptime(text: str) -> int | None:

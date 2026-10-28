@@ -11,6 +11,7 @@ from ..adapters import airfiber
 from ..adapters.ping import ping
 from ..security import decrypt_json
 from . import devices as dev
+from . import threats
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,10 @@ def poll_device(device: dict, with_olt: bool = False) -> dict:
         if device["vendor"] == "mikrotik" and device.get("credentials_enc"):
             with dev.mikrotik(device) as ros:
                 r = ros.poll()
+                try:
+                    m["security"] = ros.login_failures(device.get("log_cursor"))
+                except Exception as exc:  # log access must not mark the router degraded
+                    r["extra"]["log_error"] = f"{type(exc).__name__}: {exc}"[:200]
             m.update({k: v for k, v in r.items() if k != "extra"})
             m["extra"].update(r["extra"])
             if r["extra"]["interfaces_down"]:
@@ -115,6 +120,8 @@ def store(conn, device: dict, m: dict):
            status == "degraded")
     if onts is not None:
         store_onts(conn, device, onts)
+    if m.get("security"):
+        threats.record_events(conn, device, *m["security"])
     return status
 
 
@@ -135,6 +142,24 @@ def store_onts(conn, device, onts):
         _alert(conn, device, f"ont_low_rx:{o['serial']}", "warning",
                f"ONT {o['serial']} ({o['frame']}/{o['slot']}/{o['port']}:{o['ont_id']}) rx {rx} dBm",
                rx is not None and rx < config.ONT_LOW_RX_DBM)
+
+
+def threat_alerts(conn, result):
+    """Brute force from inside our own address space: alert a human (never auto-blocked)."""
+    active = set()
+    for o in result["internal"]:
+        device = conn.execute("SELECT id, name, island_id FROM devices WHERE id=%s", (o["last_device_id"],)).fetchone()
+        if not device:
+            continue
+        kind = f"bruteforce:{o['ip']}"
+        active.add((device["id"], kind))
+        _alert(conn, device, kind, "warning",
+               f"{o['n']} failed router logins from internal address {o['ip']} (users: {', '.join(u for u in o['users'] if u)[:60]})"
+               " — infected customer device or misconfigured tool?", True)
+    for a in conn.execute("SELECT device_id, kind FROM alerts WHERE kind LIKE 'bruteforce:%%' AND resolved_at IS NULL").fetchall():
+        if (a["device_id"], a["kind"]) not in active:
+            conn.execute("UPDATE alerts SET resolved_at=now() WHERE device_id=%s AND kind=%s AND resolved_at IS NULL",
+                         (a["device_id"], a["kind"]))
 
 
 def rollup(conn):
@@ -174,9 +199,13 @@ def sweep(cycle: int = 0, device_ids: list | None = None) -> dict:
             s = store(conn, device, m)
             counts[s] = counts.get(s, 0) + 1
         rollup(conn)
+        threat_alerts(conn, threats.evaluate(conn, notify=_notify))
         conn.execute("DELETE FROM device_metrics WHERE at < now() - interval '90 days'")
+        conn.execute("DELETE FROM security_events WHERE at < now() - interval '90 days'")
         # NAS rebooted or link dropped without Accounting-Stop: close sessions silent for 3+ interim periods.
         conn.execute("""UPDATE radacct SET acctstoptime=now(), acctterminatecause='Stale-Session'
                         WHERE acctstoptime IS NULL AND coalesce(acctupdatetime, acctstarttime) < now() - interval '20 minutes'""")
+    if any(d["vendor"] == "mikrotik" for d, _ in results):
+        counts["blocklist"] = threats.sync_all(device_ids)
     log.info("sweep %s at %s: %s", cycle, datetime.now(timezone.utc).isoformat(timespec="seconds"), counts)
     return counts

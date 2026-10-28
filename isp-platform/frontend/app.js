@@ -257,6 +257,39 @@ const PAGES = {
       autofind, 'optical levels refresh every few polling cycles; below −27 dBm raises an alert');
   }},
 
+  threats: {title: 'Threat protection', group: 'INFRASTRUCTURE', nav: '⛔ Threat protection', perm: 'read', async render(q) {
+    const history = q.get('history') === '1';
+    const [s, blocks, top, enf, events] = await Promise.all([api('/api/threats/summary'), api(`/api/threats/blocks?history=${history}`),
+      api('/api/threats/top-sources'), api('/api/threats/enforcement'), api('/api/threats/events')]);
+    const lookup = ip => `<a href="https://www.abuseipdb.com/check/${encodeURIComponent(String(ip).split('/')[0])}" target="_blank" rel="noopener noreferrer">${esc(ip)}</a>`;
+    const card = (l, v, n) => `<div class="card"><div class="label">${esc(l)}</div><div class="value">${v}</div><div class="note">${n}</div></div>`;
+    const net = can('network');
+    return `<div class="cards">
+      ${card('Blocked now', esc(s.blocked), `${esc(s.auto_blocked)} automatically`)}
+      ${card('Failed router logins', esc(s.failures_24h), `from ${esc(s.sources_24h)} addresses, last 24 h`)}
+      ${card('Routers enforcing', `${esc(s.routers_enforcing)}/${esc(s.routers_managed)}`, 'drop the blocklist in RAW')}
+      ${card('Auto-block', s.auto_block ? '<span class="s-ok">on</span>' : '<span class="s-warning">off</span>',
+        esc(`${s.failures} failures in ${s.window_min} min → ${s.block_hours / 24} days; ${s.subnet_after} IPs in a /24 → whole /24`))}
+    </div>` +
+      panel(history ? 'Block history' : 'Blocked addresses', table(blocks, [['address', 'Address', lookup], ['reason', 'Reason'], ['source', 'By', (v, r) => esc(v === 'auto' ? 'auto' : r.created_by)],
+        ['hits', 'Hits'], ['created_at', 'Since', dt], ['expires_at', 'Expires', v => v ? dt(v) : 'never'],
+        ['id', '', (id, r) => r.removed_at ? esc(`removed (${r.removed_by})`) : (net ? btn('Unblock', 'threat-unblock', {id, address: r.address}) : '')]],
+        {empty: 'Nothing blocked.'}),
+        (net ? btn('Block an address', 'threat-block', {}, 'primary') : '') + `<button class="btn small" data-act="go" data-href="${history ? '#/threats' : '#/threats?history=1'}">${history ? 'Active only' : 'History'}</button>`,
+        'pushed to the "blocklist" address list on every MikroTik; private and management addresses are never auto-blocked') +
+      `<div class="grid2">${panel('Top sources of failed logins (7 days)', table(top, [['src_ip', 'Source', lookup], ['failures', 'Failures'], ['routers', 'Routers'],
+        ['users', 'Tried users', v => esc((v || []).filter(Boolean).join(', ').slice(0, 60))], ['last_seen', 'Last', ago],
+        ['blocked', '', (v, r) => v ? '<span class="s-ok">blocked</span>' : (net ? btn('Block', 'threat-block', {address: r.src_ip}) : '')]], {empty: 'No failed logins seen.'}))}
+      ${panel('Enforcement on routers', table(enf, [['name', 'Router'], ['island_name', 'Island'], ['status', 'Status', tag],
+        ['blocklist_enforced', 'Drops blocklist', (v, r) => !r.has_credentials ? '<span class="muted">no login stored</span>' : v === true ? '<span class="s-ok">yes</span>' : v === false ? '<span class="s-critical">no</span>' : '<span class="muted">not checked yet</span>'],
+        ['blocklist_synced_at', 'Synced', ago],
+        ['id', '', (id, r) => r.blocklist_error ? `<span class="s-warning">${esc(r.blocklist_error.slice(0, 50))}</span>` :
+          (r.blocklist_enforced === false && r.has_credentials && net ? (r.change_open ? '<span class="muted">change pending</span>' : btn('Enable', 'threat-enforce', {id, name: r.name})) : '')]],
+        {empty: 'Add MikroTik routers under Devices.'}), '', 'a router that does not drop the list still gets the entries but ignores them')}</div>` +
+      panel('Recent failed logins', table(events.slice(0, 100), [['at', 'When', dt], ['src_ip', 'Source', lookup], ['username', 'User'], ['via', 'Via'], ['device_name', 'Router'], ['attempts', 'Attempts'],
+        ['blocked', '', v => v ? '<span class="s-ok">blocked</span>' : '']], {empty: 'None yet. Routers are read every poll (1 min).'}));
+  }},
+
   changes: {title: 'Config changes', group: 'INFRASTRUCTURE', nav: '⎇ Changes', perm: 'network', async render() {
     const rows = await api('/api/changes');
     return panel('Change requests', table(rows, [['id', '#'], ['title', 'Change'], ['device_name', 'Device'], ['kind', 'Type'], ['status', 'Status', tag],
@@ -480,6 +513,20 @@ const ACTIONS = {
   },
   async 'ont-reboot'(d) { if (confirmAct('Request an ONT reboot (needs approval)?')) { const r = await api(`/api/olt/onts/${d.id}/reboot`, 'POST'); location.hash = `#/change/${r.change_id}`; } },
 
+  async 'threat-block'(d) {
+    modal('<h2>Block an address on all routers</h2><p class="muted">Added to the blocklist of every MikroTik within a minute. Private, management and RADIUS addresses are refused.</p>' +
+      form('threat-block', fields([['address', 'IP or network (e.g. 16.5.0.0/24)', 'text', {required: true, default: d.address}],
+        ['reason', 'Reason', 'text', {required: true, default: 'router login brute force'}],
+        ['hours', 'Hours (blank = until removed)', 'number', {default: 168}]]), 'Block'));
+  },
+  async 'threat-unblock'(d) {
+    if (!confirmAct(`Unblock ${d.address} on all routers?`)) return;
+    await api(`/api/threats/blocks/${d.id}`, 'DELETE'); toast('Unblocked'); reload();
+  },
+  async 'threat-enforce'(d) {
+    const r = await api(`/api/threats/enforcement/${d.id}`, 'POST');
+    toast(`Change request created for ${d.name}; a second admin must approve it`); location.hash = `#/change/${r.change_id}`;
+  },
   async 'change-new'() {
     const devs = (await api('/api/devices')).filter(x => ['mikrotik', 'huawei'].includes(x.vendor));
     modal('<h2>Manual change request</h2>' + form('change', fields([['device_id', 'Device', 'select', {options: devs.map(x => [x.id, `${x.name} · ${x.vendor}`])}],
@@ -534,6 +581,10 @@ const FORMS = {
     $('#fw-out').innerHTML = panel('Generated RouterOS script', `${r.change_id ? `<p>Change request <a href="#/change/${val(r.change_id)}">#${esc(r.change_id)}</a> created — a second admin must approve it.</p>` : '<p class="muted">Review, then paste in a Winbox terminal opened in Safe Mode, or pick a router above to apply via the change workflow.</p>'}<pre id="fw-script">${esc(r.script)}</pre>`, btn('Copy', 'copy', {target: 'fw-script'}));
   },
   async user(data) { await api('/api/users', 'POST', data); closeModal(); reload(); },
+  async 'threat-block'(data) {
+    const r = await api('/api/threats/blocks', 'POST', data);
+    closeModal(); toast(`Blocked. Pushed to ${r.sync.routers} router(s)${r.sync.errors ? `, ${r.sync.errors} unreachable` : ''}.`); reload();
+  },
   async 'mfa-enable'(data) {
     const r = await api('/api/auth/mfa/enable', 'POST', {code: data.code});
     $('#mfa-setup').innerHTML = `<p class="s-ok">Two-factor is on.</p>${btn('Continue', 'mfa-finish', {}, 'primary')}`;
