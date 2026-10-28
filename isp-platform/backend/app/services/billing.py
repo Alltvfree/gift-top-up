@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from .. import audit, config
-from . import radius_sync
+from . import radius_sync, sms
 
 
 def month_start(d: date) -> date:
@@ -22,11 +22,15 @@ def generate_invoices(conn, period: date, actor: str) -> int:
            SELECT s.id, 'INV-' || to_char(%(start)s::date,'YYYYMM') || '-' || nextval('invoice_number_seq'),
                   p.monthly_price_mvr, %(due)s, 'unpaid', %(start)s, %(end)s
            FROM subscribers s JOIN service_plans p ON p.id=s.plan_id
-           WHERE s.status IN ('active','suspended')
+           WHERE s.status IN ('active','suspended') AND s.managed_by='platform'
            ON CONFLICT (subscriber_id, period_start) WHERE period_start IS NOT NULL DO NOTHING
-           RETURNING id""",
+           RETURNING id, subscriber_id, invoice_number, amount_mvr, due_at""",
         {"start": start, "end": end, "due": start + timedelta(days=config.BILLING_DUE_DAYS)},
     ).fetchall()
+    for inv in rows:
+        sub = conn.execute("SELECT * FROM subscribers WHERE id=%s", (inv["subscriber_id"],)).fetchone()
+        sms.enqueue(conn, sub, "invoice_issued", ref=f"inv:{inv['invoice_number']}", invoice=inv["invoice_number"],
+                    amount=f"{inv['amount_mvr']:.2f}", due=inv["due_at"])
     audit.record(actor, "billing.generate", "period", start.isoformat(), {"created": len(rows)}, conn=conn)
     return len(rows)
 
@@ -65,9 +69,11 @@ def record_payment(conn, subscriber_id, amount: Decimal, method: str, reference:
         conn.execute("UPDATE subscribers SET status='active', suspended_reason=NULL WHERE id=%s", (subscriber_id,))
         radius_sync.sync_subscriber(conn, {**sub, "status": "active"})
         resumed = True
+        sms.enqueue(conn, sub, "restored", ref=f"pay:{pay['id']}")
     audit.record(actor, "billing.payment", "subscriber", subscriber_id,
                  {"amount": str(amount), "method": method, "reference": reference, "allocated": allocated,
                   "credit_left": str(remaining), "resumed": resumed}, conn=conn)
+    sms.enqueue(conn, sub, "payment_received", ref=f"pay:{pay['id']}", amount=f"{Decimal(amount):.2f}")
     return {"payment_id": str(pay["id"]), "allocated": allocated, "unallocated": str(remaining),
             "service_resumed": resumed, "username": sub["pppoe_username"]}
 
@@ -75,10 +81,11 @@ def record_payment(conn, subscriber_id, amount: Decimal, method: str, reference:
 def enforce_overdue(conn, actor="system", today: date | None = None) -> list[str]:
     """Mark late invoices overdue; suspend customers past the grace period. Returns usernames to disconnect."""
     today = today or date.today()
-    conn.execute("UPDATE invoices SET status='overdue' WHERE status='unpaid' AND due_at < %s", (today,))
+    conn.execute("""UPDATE invoices SET status='overdue' WHERE status='unpaid' AND due_at < %s
+                    AND subscriber_id IN (SELECT id FROM subscribers WHERE managed_by='platform')""", (today,))
     subs = conn.execute(
         """SELECT DISTINCT s.* FROM subscribers s JOIN invoices i ON i.subscriber_id=s.id
-           WHERE s.status='active' AND i.status='overdue' AND i.due_at < %s""",
+           WHERE s.status='active' AND s.managed_by='platform' AND i.status='overdue' AND i.due_at < %s""",
         (today - timedelta(days=config.SUSPEND_AFTER_DAYS_OVERDUE),),
     ).fetchall()
     usernames = []
@@ -88,4 +95,7 @@ def enforce_overdue(conn, actor="system", today: date | None = None) -> list[str
         audit.record(actor, "subscriber.auto_suspend", "subscriber", sub["id"], {"reason": "non-payment"}, conn=conn)
         if sub["pppoe_username"]:
             usernames.append(sub["pppoe_username"])
+        balance = conn.execute("""SELECT coalesce(sum(amount_mvr-paid_mvr),0) AS b FROM invoices
+                                  WHERE subscriber_id=%s AND status IN ('unpaid','overdue')""", (sub["id"],)).fetchone()["b"]
+        sms.enqueue(conn, sub, "suspended", ref=f"susp:{today.isoformat()}", balance=f"{balance:.2f}")
     return usernames

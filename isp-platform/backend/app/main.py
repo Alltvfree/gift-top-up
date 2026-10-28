@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 from . import db
 from .migrate import migrate
-from .routers import auth, billing, changes, inventory, monitoring, olt, radius, security, subscribers, threats
+from .routers import auth, billing, changes, inventory, monitoring, olt, radius, security, sms, subscribers, threats, imports
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -23,7 +23,7 @@ async def lifespan(app):
 app = FastAPI(title="SatLink Operations API", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None,
               lifespan=lifespan)
 for r in (auth.router, auth.users, inventory.router, subscribers.router, billing.router, radius.router,
-          monitoring.router, olt.router, changes.router, security.router, threats.router):
+          monitoring.router, olt.router, changes.router, security.router, threats.router, sms.router, imports.router):
     app.include_router(r)
 
 

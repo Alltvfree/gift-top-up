@@ -130,7 +130,8 @@ const PAGES = {
     const rows = await api('/api/islands');
     return panel(`Islands (${rows.length})`, table(rows, [['code', 'Code'], ['name', 'Name'], ['atoll', 'Atoll'], ['status', 'Status', tag],
       ['device_count', 'Devices'], ['active_subscribers', 'Active subs'], ['open_alerts', 'Alerts'],
-      ['id', '', (id, r) => can('network') ? btn('Edit', 'island-edit', {id}) : '']]), can('network') ? btn('Add island', 'island-edit', {}, 'primary') : '');
+      ['id', '', (id, r) => (can('network') ? btn('Edit', 'island-edit', {id}) : '') + (can('approve') ? ' ' + btn('Notify', 'sms-broadcast', {island: id, name: r.name}) : '')]]),
+      can('network') ? btn('Add island', 'island-edit', {}, 'primary') : '');
   }},
 
   alerts: {title: 'Alerts', group: 'OVERVIEW', nav: '⚠ Alerts', perm: 'read', async render(q) {
@@ -150,7 +151,8 @@ const PAGES = {
       ['status', 'Status', 'select', {options: [['', 'Any'], ['active', 'Active'], ['suspended', 'Suspended'], ['pending', 'Pending'], ['cancelled', 'Cancelled']]}],
       ['island_id', 'Island', 'select', {options: none('Any island').concat(islands)}]], Object.fromEntries(q))}<div class="actions end"><button class="btn" type="submit">Filter</button></div></form>`;
     return panel('Find', filters) + panel(`Subscribers (${rows.length})`, table(rows, [['account_number', 'Account'], ['full_name', 'Name'], ['island_name', 'Island'],
-      ['plan_name', 'Plan'], ['pppoe_username', 'PPPoE user'], ['online', 'Online', v => v ? '<span class="s-online">●</span>' : '<span class="muted">○</span>'],
+      ['plan_name', 'Plan'], ['pppoe_username', 'PPPoE user'], ['expires_at', 'Expires', (v, r) => v ? `<span class="${new Date(v) < new Date() ? 's-overdue' : ''}">${esc(v)}</span>` : '—'],
+      ['managed_by', 'Billing', v => v === 'dma' ? '<span class="tag">DMA</span>' : '<span class="tag">SatLink</span>'], ['online', 'Online', v => v ? '<span class="s-online">●</span>' : '<span class="muted">○</span>'],
       ['status', 'Status', tag], ['balance_mvr', 'Balance', v => Number(v) > 0 ? `<span class="s-overdue">${esc(mvr(v))}</span>` : esc(mvr(v))]],
       {href: r => `#/subscriber/${r.id}`}), can('subscribers') ? btn('New subscriber', 'sub-edit', {}, 'primary') : '');
   }},
@@ -162,6 +164,7 @@ const PAGES = {
       s.status === 'active' ? btn('Suspend', 'sub-status', {id, status: 'suspended'}, 'danger') : '',
       s.status !== 'cancelled' ? btn('Cancel service', 'sub-status', {id, status: 'cancelled'}, 'danger') : '',
       btn('Edit', 'sub-edit', {id}), btn('Reset PPPoE password', 'sub-reset', {id}), btn('Disconnect session', 'sub-disconnect', {id}),
+      btn('Send SMS', 'sms-one', {id, name: s.full_name, phone: s.phone || ''}),
     ].join('') : '';
     const billingActs = can('billing') ? btn('Record payment', 'pay', {id, name: s.full_name}, 'primary') : '';
     const ontActs = can('network') ? btn('Provision ONT', 'ont-provision', {sub: id}) : '';
@@ -170,7 +173,7 @@ const PAGES = {
         <div class="card"><div class="label">Status</div><div class="value">${tag(s.status)}</div><div class="note">${esc(s.suspended_reason || '')}</div></div>
         <div class="card"><div class="label">PPPoE username</div><div class="value v-md">${esc(s.pppoe_username)}</div><div class="note">RADIUS group: ${esc(s.radius_group.map(g => g.groupname).join(', '))}</div></div>
         <div class="card"><div class="label">Contact</div><div class="value v-sm">${esc(s.phone)}</div><div class="note">${esc(s.address)}</div></div>
-        <div class="card"><div class="label">Static IP</div><div class="value v-md">${esc(s.static_ip)}</div><div class="note">created ${dt(s.created_at)}</div></div>
+        <div class="card"><div class="label">${s.managed_by === 'dma' ? 'Billing: DMA · expires' : 'Static IP'}</div><div class="value v-md">${esc(s.managed_by === 'dma' ? s.expires_at : s.static_ip)}</div><div class="note">${s.managed_by === 'dma' ? 'imported from DMA ' + dt(s.imported_at) : 'created ' + dt(s.created_at)}</div></div>
       </div>`, acts) +
       panel('Sessions', table(s.sessions, [['acctstarttime', 'Start', dt], ['acctstoptime', 'Stop', v => v ? dt(v) : '<span class="s-online">online</span>'], ['ip', 'IP'], ['mac', 'MAC / ONT'],
         ['nas', 'NAS'], ['acctinputoctets', 'Up', bytes], ['acctoutputoctets', 'Down', bytes], ['acctterminatecause', 'Cause']], {empty: 'No sessions yet'})) +
@@ -178,6 +181,25 @@ const PAGES = {
        ${panel('Login attempts', table(s.auth_log, [['authdate', 'When', dt], ['reply', 'Result', v => v === 'Access-Accept' ? '<span class="s-ok">accept</span>' : `<span class="s-critical">${esc(v)}</span>`], ['callingstationid', 'From']], {empty: 'No RADIUS attempts'}))}</div>` +
       panel('ONT', table(s.onts, [['serial', 'Serial'], ['frame', 'F/S/P:ID', (v, r) => esc(`${r.frame}/${r.slot}/${r.port}:${r.ont_id ?? '?'}`)], ['run_state', 'State', tag], ['rx_power_dbm', 'ONT Rx', dbm], ['olt_rx_power_dbm', 'OLT Rx', dbm], ['last_seen_at', 'Seen', ago]], {empty: 'No ONT linked'}), ontActs) +
       panel('Payments', table(s.payments, [['received_at', 'Date', dt], ['amount_mvr', 'Amount', mvr], ['method', 'Method'], ['reference', 'Reference'], ['recorded_by', 'By']]));
+  }},
+
+  sms: {title: 'SMS', group: 'CUSTOMERS', nav: '✉ SMS', perm: 'read', async render() {
+    const [st, tpl, msgs] = await Promise.all([api('/api/sms/status'), api('/api/sms/templates'), api('/api/sms/messages')]);
+    const card = (l, v, n) => `<div class="card"><div class="label">${esc(l)}</div><div class="value">${v}</div><div class="note">${n}</div></div>`;
+    const adm = can('approve');
+    return `<div class="cards">
+      ${card('Gateway', st.configured ? '<span class="s-ok">MessageOwl</span>' : '<span class="s-warning">not set</span>', st.configured ? `sender ID ${esc(st.sender_id)}` : 'set MSGOWL_ACCESS_KEY in .env')}
+      ${card('Queued', esc(st.queued), 'sent by the worker, ~40/min')}
+      ${card('Sent (24 h)', esc(st.sent_24h), '')}
+      ${card('Failed (24 h)', st.failed_24h ? `<span class="s-critical">${esc(st.failed_24h)}</span>` : '0', 'see the log below')}
+    </div>` +
+      (adm ? `<div class="grid2">${panel('Outage / maintenance notice', '<p class="muted">Same text to every active subscriber of one island, or everyone. Sent in bulk.</p>' + btn('Write notice', 'sms-broadcast', {}, 'primary'))}
+        ${panel('Test the gateway', form('sms-test', fields([['phone', 'Mobile number', 'text', {required: true, placeholder: '7771234'}], ['body', 'Text', 'text', {default: 'SatLink: test message from the operations platform.'}]]), 'Send test'), st.configured ? btn('Check balance', 'sms-balance') : '')}</div>` : '') +
+      panel('Automatic messages', table(tpl, [['kind', 'When'], ['body', 'Text'], ['enabled', 'On', v => v ? '<span class="s-ok">on</span>' : '<span class="muted">off</span>'],
+        ['kind', '', (k, r) => adm ? btn('Edit', 'sms-template', {kind: k}) : '']]), '',
+        `placeholders: ${st.placeholders.map(p => '{' + p + '}').join(' ')} · reminders go ${st.reminder_days} days before the due date · customers billed by DMA never get billing messages`) +
+      panel('Message log (latest 500)', table(msgs, [['created_at', 'Queued', dt], ['account_number', 'Account'], ['phone', 'Phone'], ['kind', 'Type'], ['body', 'Text', v => esc(String(v).slice(0, 90))],
+        ['status', 'Status', tag], ['error', 'Error'], ['created_by', 'By']], {empty: 'No messages yet.'}));
   }},
 
   plans: {title: 'Plans', group: 'CUSTOMERS', nav: '▤ Plans', perm: 'read', async render() {
@@ -354,6 +376,20 @@ const PAGES = {
       btn('Add user', 'user-add', {}, 'primary'), 'admin: everything (two-factor required) · noc: network + subscribers · billing: plans, invoices, payments · support: read only');
   }},
 
+  import: {title: 'Import from DMA', group: 'ADMIN', nav: '⇪ Import', perm: 'approve', async render() {
+    const islands = await options('islands');
+    return panel('Import subscribers or NAS clients', `<p class="muted">Export users (or NAS) from DMA Radius Manager as CSV and choose the file.
+      <b>Preview</b> checks every row and writes nothing. Imported subscribers stay billed by DMA: SatLink will not invoice, suspend or text them about billing.
+      Re-importing the same file later updates them instead of creating duplicates.</p>
+      <form class="grid-form" data-form="import">
+        <label>What<select name="kind" data-type="select"><option value="subscribers">Subscribers (users)</option><option value="nas">NAS clients (routers)</option></select></label>
+        <label>CSV file<input type="file" id="import-file" accept=".csv,.txt,text/csv" required></label>
+        <label>Island for users without one<select name="default_island_id" data-type="select">${none('—').concat(islands).map(([v, l]) => `<option value="${val(v)}">${esc(l)}</option>`).join('')}</select></label>
+        <label class="check"><input type="checkbox" name="create_missing_plans" data-type="check"> Create missing plans (as inactive 1/1 Mbps placeholders to edit later)</label>
+        <div class="full actions"><button class="btn primary" type="submit">Preview</button></div>
+      </form><div id="import-out"></div>`);
+  }},
+
   audit: {title: 'Audit log', group: 'ADMIN', nav: '☰ Audit log', perm: 'approve', async render() {
     const rows = await api('/api/audit');
     return panel('Who did what', table(rows, [['created_at', 'When', dt], ['actor', 'User'], ['action', 'Action'], ['target_type', 'Target'], ['detail', 'Detail', v => `<code>${esc(JSON.stringify(v)).slice(0, 300)}</code>`]]));
@@ -385,6 +421,28 @@ function showRecoveryCodes(codes, finishAct) {
   modal(`<h2>Save your recovery codes</h2><p>If you lose your phone, each code signs you in <b>once</b>. Keep them in a password manager or print them.
     They will not be shown again.</p><pre id="recovery-codes">${esc(codes.join('\n'))}</pre>
     <div class="actions">${btn('Copy', 'copy', {target: 'recovery-codes'})}${btn('Download .txt', 'mfa-download')}${btn("I've saved them", finishAct, {}, 'primary')}</div>`);
+}
+
+// ---------------------------------------------------------------- import report
+let importState = null;
+function importReport(r) {
+  const cols = Object.entries(r.columns).map(([f, h]) => `<span class="tag">${esc(f)} ← ${esc(h)}</span>`).join(' ');
+  const counts = `<div class="cards">
+    <div class="card"><div class="label">Rows</div><div class="value">${esc(r.rows)}</div><div class="note">${r.dry_run ? 'preview — nothing written' : 'imported'}</div></div>
+    <div class="card"><div class="label">New</div><div class="value">${esc(r.new)}</div><div class="note">updated ${esc(r.updated)} · skipped ${esc(r.skipped)}</div></div>
+    <div class="card"><div class="label">Errors</div><div class="value">${r.errors.length ? `<span class="s-critical">${esc(r.errors.length)}</span>` : '0'}</div><div class="note">rows not imported</div></div>
+    <div class="card"><div class="label">${r.kind === 'nas' ? 'Short secrets' : 'Status'}</div><div class="value v-sm">${r.kind === 'nas' ? esc(r.weak_secrets) : esc(Object.entries(r.status).map(([k, v]) => `${k} ${v}`).join(' · ') || '—')}</div>
+      <div class="note">${r.kind === 'nas' ? 'under 12 characters' : `${esc(r.no_password)} without password · ${esc(r.invalid_phones)} invalid mobiles`}</div></div></div>`;
+  const warn = [
+    r.kind === 'subscribers' && r.no_password ? `<p class="s-warning">${esc(r.no_password)} users have no password in the file. They will need a password before this platform's RADIUS can log them in.</p>` : '',
+    r.plans_missing && r.plans_missing.length ? `<p class="s-warning">Plans not found: ${r.plans_missing.map(p => esc(`${p.name} (${p.subscribers})`)).join(', ')}. Create them under Plans first, or tick "Create missing plans".</p>` : '',
+    r.unmapped_columns.length ? `<p class="muted">Ignored columns: ${esc(r.unmapped_columns.join(', '))}</p>` : '',
+    r.note ? `<p class="s-warning">${esc(r.note)}</p>` : '',
+  ].join('');
+  return panel(r.dry_run ? 'Preview' : 'Import result', `<p>${cols || '<span class="s-critical">No known columns found</span>'}</p>${counts}${warn}` +
+    (r.sample.length ? '<h3>First rows as understood</h3>' + table(r.sample, Object.keys(r.sample[0]).map(k => [k, k])) : '') +
+    (r.errors.length ? '<h3>Problems</h3>' + table(r.errors, [['row', 'Line'], ['error', 'Problem']]) : ''),
+    r.dry_run && !r.errors.some(e => e.row === 1) && (r.new + r.updated) > 0 ? btn(`Import ${r.new + r.updated} now`, 'import-apply', {}, 'primary') : '');
 }
 
 // ---------------------------------------------------------------- actions
@@ -527,6 +585,27 @@ const ACTIONS = {
     const r = await api(`/api/threats/enforcement/${d.id}`, 'POST');
     toast(`Change request created for ${d.name}; a second admin must approve it`); location.hash = `#/change/${r.change_id}`;
   },
+  'sms-one'(d) {
+    modal(`<h2>SMS to ${esc(d.name)}</h2><p class="muted">${esc(d.phone || 'no number on file')}</p>` +
+      form('sms-one', fields([['body', 'Text (max 640 characters)', 'textarea', {required: true}]]), 'Send', {sub: d.id}));
+  },
+  async 'sms-broadcast'(d) {
+    const islands = await options('islands');
+    modal('<h2>Outage / maintenance notice</h2><p class="muted">Goes to every active subscriber with a valid mobile number. Recorded in the audit log.</p>' +
+      form('sms-broadcast', fields([['island_id', 'Island', 'select', {options: none('All islands').concat(islands), default: d.island || ''}],
+        ['body', 'Text', 'textarea', {required: true, placeholder: 'SatLink: Internet on Neykurendhoo is down due to a backhaul fault. Expected back by 15:00. Sorry for the inconvenience.'}],
+        ['include_suspended', 'Also suspended subscribers', 'check']]), 'Send to all'));
+  },
+  async 'sms-template'(d) {
+    const t = (await api('/api/sms/templates')).find(x => x.kind === d.kind);
+    modal(`<h2>Message: ${esc(d.kind)}</h2>` + form('sms-template', fields([['body', 'Text', 'textarea', {required: true}], ['enabled', 'Send this message', 'check']], t), 'Save', {kind: d.kind}));
+  },
+  async 'sms-balance'() { const b = await api('/api/sms/balance'); toast(`MessageOwl balance: ${JSON.stringify(b)}`); },
+  async 'import-apply'() {
+    if (!importState || !confirmAct(`Import ${importState.kind} now? ${importState.report.new} new, ${importState.report.updated} updated.`)) return;
+    const r = await api(`/api/import/${importState.kind}`, 'POST', {...importState.body, dry_run: false});
+    $('#import-out').innerHTML = importReport(r); importState = null; toast('Import finished');
+  },
   async 'change-new'() {
     const devs = (await api('/api/devices')).filter(x => ['mikrotik', 'huawei'].includes(x.vendor));
     modal('<h2>Manual change request</h2>' + form('change', fields([['device_id', 'Device', 'select', {options: devs.map(x => [x.id, `${x.name} · ${x.vendor}`])}],
@@ -584,6 +663,23 @@ const FORMS = {
   async 'threat-block'(data) {
     const r = await api('/api/threats/blocks', 'POST', data);
     closeModal(); toast(`Blocked. Pushed to ${r.sync.routers} router(s)${r.sync.errors ? `, ${r.sync.errors} unreachable` : ''}.`); reload();
+  },
+  async 'sms-one'(data, f) { await api(`/api/sms/subscribers/${f.dataset.sub}`, 'POST', data); closeModal(); toast('SMS queued'); },
+  async 'sms-broadcast'(data) {
+    if (!confirmAct('Send this SMS to every matching subscriber?')) return;
+    const r = await api('/api/sms/broadcast', 'POST', data); closeModal();
+    toast(`Queued for ${r.queued} subscribers (${r.no_phone} without a valid number)`); if (location.hash === '#/sms') reload();
+  },
+  async 'sms-template'(data, f) { await api(`/api/sms/templates/${f.dataset.kind}`, 'PUT', data); closeModal(); reload(); },
+  async 'sms-test'(data) { const r = await api('/api/sms/test', 'POST', data); toast(`Sent to ${r.phone} (MessageOwl id ${r.id})`); },
+  async import(data) {
+    const file = $('#import-file').files[0];
+    if (!file) throw new Error('Choose a CSV file');
+    const csv = await file.text();
+    const body = {csv, default_island_id: data.default_island_id, create_missing_plans: !!data.create_missing_plans};
+    const report = await api(`/api/import/${data.kind}`, 'POST', {...body, dry_run: true});
+    importState = {kind: data.kind, body, report};
+    $('#import-out').innerHTML = importReport(report);
   },
   async 'mfa-enable'(data) {
     const r = await api('/api/auth/mfa/enable', 'POST', {code: data.code});

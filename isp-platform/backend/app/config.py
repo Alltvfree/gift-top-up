@@ -51,3 +51,10 @@ THREAT_SUBNET_AFTER = _int("THREAT_SUBNET_AFTER", 3)      # this many blocked IP
 # Never auto-blocked (your NOC, VPN, upstream...). Private/CGNAT ranges are never auto-blocked either:
 # an attack from inside raises an alert instead, so a customer or a NOC PC is never cut off by a script.
 THREAT_NEVER_BLOCK = [n.strip() for n in os.environ.get("THREAT_NEVER_BLOCK", "").split(",") if n.strip()]
+
+# SMS via MessageOwl (msgowl.com). Leave the key empty to keep SMS off; messages then stay queued.
+MSGOWL_ACCESS_KEY = os.environ.get("MSGOWL_ACCESS_KEY", "")
+MSGOWL_SENDER_ID = os.environ.get("MSGOWL_SENDER_ID", "SatLink")
+SMS_PER_MINUTE = _int("SMS_PER_MINUTE", 40)          # MessageOwl allows 50 POST/min
+SMS_BULK_CHUNK = _int("SMS_BULK_CHUNK", 100)         # recipients per bulk POST (broadcasts)
+SMS_REMINDER_DAYS = _int("SMS_REMINDER_DAYS", 3)     # due_reminder this many days before due date

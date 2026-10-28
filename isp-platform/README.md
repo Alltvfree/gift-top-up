@@ -10,6 +10,8 @@ Monitoring, configuration, billing and RADIUS for an island ISP:
 | Security | **Threat protection**: hosts brute-forcing router logins are detected from MikroTik logs and blocked on every router (rotating bots: whole /24). Two-factor sign-in (authenticator app) required for admins. RouterOS firewall/hardening generator (management lockdown, brute-force and port-scan blocklists, BCP38, ONT/CPE protection from botnets, customer isolation, anti-spam, open-resolver block, suspended-customer redirect) and a live **security audit** of each router. Platform: roles, lockouts, rate limits, strict CSP, encrypted device credentials, audit log. |
 | Subscribers & RADIUS | Create → pending (rejected) → active (plan speed via `Mikrotik-Rate-Limit`) → suspended (256k + payment-page redirect) → cancelled. One login per account. State changes disconnect the live session (RFC 5176). |
 | Billing | Monthly invoices (MVR), payment allocation oldest-first, auto-overdue, auto-suspend after a grace period, auto-restore when paid. |
+| SMS (MessageOwl) | Automatic invoice / reminder / payment / suspended / restored messages (editable templates), one-off SMS, outage notices to a whole island in bulk, full message log. |
+| Import from DMA | CSV import of subscribers and NAS from DMA Radius Manager with a dry-run preview; imported customers stay billed by DMA until switched over ([docs/MIGRATE-FROM-DMA.md](docs/MIGRATE-FROM-DMA.md)). |
 | Smart OLT | Autofind unregistered ONTs, provision ONT + PPPoE + service-port as a reviewed change, reboot ONT, optical levels per subscriber. |
 
 ## Layout

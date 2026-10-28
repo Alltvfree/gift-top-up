@@ -11,7 +11,7 @@ from ..security import generate_pppoe_password
 from ..services import radius_sync
 
 router = APIRouter(prefix="/api", tags=["subscribers"])
-USERNAME = r"^[a-z0-9._@-]{3,64}$"
+USERNAME = r"^[A-Za-z0-9._@-]{2,64}$"  # case kept: RADIUS usernames are case-sensitive
 
 
 class SubscriberIn(BaseModel):
@@ -45,7 +45,7 @@ def subscribers(q: str | None = None, status: str | None = None, island_id: UUID
     params += [min(limit, 1000), offset]
     return db.rows(
         f"""SELECT s.id,s.account_number,s.full_name,s.phone,s.address,s.pppoe_username,s.status,s.suspended_reason,
-                   host(s.static_ip) AS static_ip,s.island_id,s.plan_id,i.name AS island_name,p.name AS plan_name,
+                   host(s.static_ip) AS static_ip,s.island_id,s.plan_id,i.name AS island_name,p.name AS plan_name,s.expires_at,s.managed_by,
                    (SELECT coalesce(sum(amount_mvr-paid_mvr),0) FROM invoices v WHERE v.subscriber_id=s.id AND v.status IN ('unpaid','overdue')) AS balance_mvr,
                    EXISTS(SELECT 1 FROM radacct a WHERE a.username=s.pppoe_username AND a.acctstoptime IS NULL) AS online
             FROM subscribers s LEFT JOIN islands i ON i.id=s.island_id LEFT JOIN service_plans p ON p.id=s.plan_id
