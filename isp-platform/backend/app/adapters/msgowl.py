@@ -1,6 +1,6 @@
 """MessageOwl (msgowl) SMS gateway, Maldives.
 
-Matches the official SDK (github.com/messageowl/msgowl-php): POST https://rest.msgowl.com/messages
+Implements MessageOwl's REST API directly in Python: POST https://rest.msgowl.com/messages
 with `Authorization: AccessKey <key>` and JSON {recipients, sender_id, body}; reply {id, message}.
 Errors: 401 bad key, 422 validation (may carry bulk_limit), 429 rate limit (50 POST/min, retry_after).
 """
