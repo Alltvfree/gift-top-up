@@ -15,7 +15,8 @@ async function api(path, method = 'GET', body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = (r.headers.get('content-type') || '').includes('json') ? await r.json() : null;
-  if (r.status === 401 && path !== '/api/auth/login') { showLogin(); throw new Error('Session expired, sign in again'); }
+  if (r.status === 401 && !path.startsWith('/api/auth/login')) { showLogin(); throw new Error('Session expired, sign in again'); }
+  if (r.status === 403 && data && /Two-factor authentication must be set up/.test(data.detail)) { start(); throw new Error(data.detail); }
   if (!r.ok) {
     let d = data && data.detail;
     if (Array.isArray(d)) d = d.map(x => `${(x.loc || []).slice(-1)[0]}: ${x.msg}`).join('; ');
@@ -66,7 +67,7 @@ function fields(defs, values = {}) {
     if (type === 'check') return `<label class="check"><input type="checkbox" name="${name}" data-type="check"${(v ?? x.default) ? ' checked' : ''}> ${esc(label)}</label>`;
     if (type === 'textarea' || type === 'json' || type === 'list') {
       const text = type === 'json' ? JSON.stringify(v ?? x.default ?? {}, null, 1) : type === 'list' ? (v || x.default || []).join('\n') : (v ?? '');
-      return `<label style="grid-column:1/-1">${esc(label)}<textarea name="${name}" data-type="${type}"${ph}${req}>${val(text)}</textarea></label>`;
+      return `<label class="full">${esc(label)}<textarea name="${name}" data-type="${type}"${ph}${req}>${val(text)}</textarea></label>`;
     }
     return `<label>${esc(label)}<input name="${name}" type="${type}" data-type="${type}" value="${val(v ?? x.default ?? '')}"${ph}${req}${x.step ? ` step="${x.step}"` : ''}></label>`;
   }).join('');
@@ -86,7 +87,7 @@ function formData(form) {
   return out;
 }
 const form = (name, inner, submit = 'Save', data = {}) =>
-  `<form class="grid-form" data-form="${name}" ${Object.entries(data).map(([k, v]) => `data-${k}="${val(v)}"`).join(' ')}>${inner}<div style="grid-column:1/-1" class="actions"><button class="btn primary" type="submit">${esc(submit)}</button></div></form>`;
+  `<form class="grid-form" data-form="${name}" ${Object.entries(data).map(([k, v]) => `data-${k}="${val(v)}"`).join(' ')}>${inner}<div class="full actions"><button class="btn primary" type="submit">${esc(submit)}</button></div></form>`;
 
 function modal(html) { $('#modal-content').innerHTML = html; $('#modal').classList.remove('hidden'); }
 function closeModal() { $('#modal').classList.add('hidden'); $('#modal-content').innerHTML = ''; }
@@ -147,7 +148,7 @@ const PAGES = {
     const [rows, islands] = await Promise.all([api('/api/subscribers?' + params), options('islands')]);
     const filters = `<form class="grid-form" data-form="sub-filter">${fields([['q', 'Search name / account / username / phone', 'text'],
       ['status', 'Status', 'select', {options: [['', 'Any'], ['active', 'Active'], ['suspended', 'Suspended'], ['pending', 'Pending'], ['cancelled', 'Cancelled']]}],
-      ['island_id', 'Island', 'select', {options: none('Any island').concat(islands)}]], Object.fromEntries(q))}<div class="actions" style="align-self:end"><button class="btn" type="submit">Filter</button></div></form>`;
+      ['island_id', 'Island', 'select', {options: none('Any island').concat(islands)}]], Object.fromEntries(q))}<div class="actions end"><button class="btn" type="submit">Filter</button></div></form>`;
     return panel('Find', filters) + panel(`Subscribers (${rows.length})`, table(rows, [['account_number', 'Account'], ['full_name', 'Name'], ['island_name', 'Island'],
       ['plan_name', 'Plan'], ['pppoe_username', 'PPPoE user'], ['online', 'Online', v => v ? '<span class="s-online">●</span>' : '<span class="muted">○</span>'],
       ['status', 'Status', tag], ['balance_mvr', 'Balance', v => Number(v) > 0 ? `<span class="s-overdue">${esc(mvr(v))}</span>` : esc(mvr(v))]],
@@ -167,9 +168,9 @@ const PAGES = {
     return panel(`${s.full_name} · ${s.account_number}`, `
       <div class="cards">
         <div class="card"><div class="label">Status</div><div class="value">${tag(s.status)}</div><div class="note">${esc(s.suspended_reason || '')}</div></div>
-        <div class="card"><div class="label">PPPoE username</div><div class="value" style="font-size:18px">${esc(s.pppoe_username)}</div><div class="note">RADIUS group: ${esc(s.radius_group.map(g => g.groupname).join(', '))}</div></div>
-        <div class="card"><div class="label">Contact</div><div class="value" style="font-size:16px">${esc(s.phone)}</div><div class="note">${esc(s.address)}</div></div>
-        <div class="card"><div class="label">Static IP</div><div class="value" style="font-size:18px">${esc(s.static_ip)}</div><div class="note">created ${dt(s.created_at)}</div></div>
+        <div class="card"><div class="label">PPPoE username</div><div class="value v-md">${esc(s.pppoe_username)}</div><div class="note">RADIUS group: ${esc(s.radius_group.map(g => g.groupname).join(', '))}</div></div>
+        <div class="card"><div class="label">Contact</div><div class="value v-sm">${esc(s.phone)}</div><div class="note">${esc(s.address)}</div></div>
+        <div class="card"><div class="label">Static IP</div><div class="value v-md">${esc(s.static_ip)}</div><div class="note">created ${dt(s.created_at)}</div></div>
       </div>`, acts) +
       panel('Sessions', table(s.sessions, [['acctstarttime', 'Start', dt], ['acctstoptime', 'Stop', v => v ? dt(v) : '<span class="s-online">online</span>'], ['ip', 'IP'], ['mac', 'MAC / ONT'],
         ['nas', 'NAS'], ['acctinputoctets', 'Up', bytes], ['acctoutputoctets', 'Down', bytes], ['acctterminatecause', 'Cause']], {empty: 'No sessions yet'})) +
@@ -227,9 +228,9 @@ const PAGES = {
     const m = d.metrics[0] || {};
     return panel(`${d.name}`, `<div class="cards">
         <div class="card"><div class="label">Status</div><div class="value">${tag(d.status)}</div><div class="note">seen ${ago(d.last_seen_at)}</div></div>
-        <div class="card"><div class="label">Latency / loss</div><div class="value" style="font-size:20px">${esc(m.latency_ms)} ms</div><div class="note">${esc(m.packet_loss_pct)}% loss</div></div>
-        <div class="card"><div class="label">CPU / memory</div><div class="value" style="font-size:20px">${esc(m.cpu_load_pct)}%</div><div class="note">${esc(m.mem_used_pct)}% memory</div></div>
-        <div class="card"><div class="label">Identity</div><div class="value" style="font-size:16px">${esc(d.vendor)} · ${esc(d.role)}</div><div class="note">${esc(d.management_ip)} · ${esc(d.model)} ${esc(d.software_version)} · creds ${d.has_credentials ? 'stored' : 'missing'}</div></div>
+        <div class="card"><div class="label">Latency / loss</div><div class="value v-lg">${esc(m.latency_ms)} ms</div><div class="note">${esc(m.packet_loss_pct)}% loss</div></div>
+        <div class="card"><div class="label">CPU / memory</div><div class="value v-lg">${esc(m.cpu_load_pct)}%</div><div class="note">${esc(m.mem_used_pct)}% memory</div></div>
+        <div class="card"><div class="label">Identity</div><div class="value v-sm">${esc(d.vendor)} · ${esc(d.role)}</div><div class="note">${esc(d.management_ip)} · ${esc(d.model)} ${esc(d.software_version)} · creds ${d.has_credentials ? 'stored' : 'missing'}</div></div>
       </div>${d.last_poll_error ? `<div class="error">Last poll: ${esc(d.last_poll_error)}</div>` : ''}${m.extra ? `<pre>${esc(JSON.stringify(m.extra, null, 1))}</pre>` : ''}`, acts) +
       panel('Recent polls', table(d.metrics.slice(0, 30), [['at', 'When', dt], ['reachable', 'Up', v => v ? '<span class="s-ok">yes</span>' : '<span class="s-critical">no</span>'],
         ['latency_ms', 'Latency ms'], ['packet_loss_pct', 'Loss %'], ['cpu_load_pct', 'CPU %'], ['mem_used_pct', 'Mem %'], ['extra', 'PPPoE', v => esc(v && v.pppoe_active)]], {empty: 'Not polled yet'})) +
@@ -311,10 +312,11 @@ const PAGES = {
   users: {title: 'Users', group: 'ADMIN', nav: '⚇ Users', perm: 'users', async render() {
     const rows = await api('/api/users');
     return panel('Platform users', table(rows, [['username', 'User'], ['full_name', 'Name'], ['role', 'Role'], ['active', 'Active', v => v ? 'yes' : '<span class="s-offline">disabled</span>'],
+      ['totp_enabled', '2FA', (v, r) => v ? '<span class="s-ok">on</span>' : (r.role === 'admin' ? '<span class="s-warning">not set up</span>' : '<span class="muted">off</span>')],
       ['last_login_at', 'Last login', dt], ['locked_until', 'Locked until', dt],
-      ['id', '', (id, r) => [btn('Reset password', 'user-pw', {id}), btn(r.active ? 'Disable' : 'Enable', 'user-active', {id, active: r.active ? '' : '1'}, r.active ? 'danger' : ''),
+      ['id', '', (id, r) => [btn('Reset password', 'user-pw', {id}), r.totp_enabled && id !== ME.id ? btn('Reset 2FA', 'user-mfa-reset', {id, name: r.username}, 'danger') : '', btn(r.active ? 'Disable' : 'Enable', 'user-active', {id, active: r.active ? '' : '1'}, r.active ? 'danger' : ''),
         `<select data-act-change="user-role" data-id="${val(id)}">${['admin', 'noc', 'billing', 'support'].map(x => `<option${x === r.role ? ' selected' : ''}>${x}</option>`).join('')}</select>`].join(' ')]]),
-      btn('Add user', 'user-add', {}, 'primary'), 'admin: everything · noc: network + subscribers · billing: plans, invoices, payments · support: read only');
+      btn('Add user', 'user-add', {}, 'primary'), 'admin: everything (two-factor required) · noc: network + subscribers · billing: plans, invoices, payments · support: read only');
   }},
 
   audit: {title: 'Audit log', group: 'ADMIN', nav: '☰ Audit log', perm: 'approve', async render() {
@@ -323,15 +325,58 @@ const PAGES = {
   }},
 
   account: {title: 'My account', group: 'ADMIN', nav: '⚙ My account', perm: 'read', async render() {
-    return panel('Change password', form('my-password', fields([['current_password', 'Current password', 'password', {required: true}], ['new_password', 'New password (12+, upper/lower/digit)', 'password', {required: true}]]), 'Change password'));
+    const codeField = [['code', 'Current 6-digit code', 'text', {required: true}]];
+    const mfa = !ME.totp_enabled ? mfaSetupPanel('Optional for your role, but strongly recommended.') :
+      panel('Two-factor sign-in', `<p>Status: <span class="s-ok">on</span></p>
+        <h3>New recovery codes</h3><p class="muted">Replaces all old codes. Do this if you used several or think they leaked.</p>` +
+        form('mfa-regen', fields(codeField), 'Generate new codes') +
+        (ME.mfa_required_for_role
+          ? `<p class="muted">Two-factor is required for the ${esc(ME.role)} role. Lost your phone? Sign in with a recovery code, or ask another admin to reset your two-factor.</p>`
+          : '<h3>Turn off</h3>' + form('mfa-disable', fields([['password', 'Password', 'password', {required: true}], ...codeField]), 'Turn off two-factor')));
+    return mfa + panel('Change password', form('my-password', fields([['current_password', 'Current password', 'password', {required: true}], ['new_password', 'New password (12+, upper/lower/digit)', 'password', {required: true}]]), 'Change password'));
   }},
 };
+
+// ---------------------------------------------------------------- two-factor
+let lastRecoveryCodes = [];
+function mfaSetupPanel(intro) {
+  return panel('Set up two-factor sign-in', `<p class="muted">${esc(intro)}</p>
+    <ol class="steps"><li>Install an authenticator app on your phone (Google Authenticator, Microsoft Authenticator, Authy, 1Password…).</li>
+    <li>Press <b>Start</b> and scan the QR code with the app.</li><li>Type the 6-digit code the app shows.</li></ol>
+    <div id="mfa-setup">${btn('Start', 'mfa-start', {}, 'primary')}</div>`);
+}
+function showRecoveryCodes(codes, finishAct) {
+  lastRecoveryCodes = codes;
+  modal(`<h2>Save your recovery codes</h2><p>If you lose your phone, each code signs you in <b>once</b>. Keep them in a password manager or print them.
+    They will not be shown again.</p><pre id="recovery-codes">${esc(codes.join('\n'))}</pre>
+    <div class="actions">${btn('Copy', 'copy', {target: 'recovery-codes'})}${btn('Download .txt', 'mfa-download')}${btn("I've saved them", finishAct, {}, 'primary')}</div>`);
+}
 
 // ---------------------------------------------------------------- actions
 const reload = () => route();
 const confirmAct = msg => window.confirm(msg);
 const ACTIONS = {
   go: d => { closeModal(); location.hash = d.href; },
+
+  async 'mfa-start'() {
+    const r = await api('/api/auth/mfa/setup', 'POST');
+    const qr = qrcode(0, 'M'); qr.addData(r.uri); qr.make();
+    $('#mfa-setup').innerHTML = `<img class="qr" alt="QR code for your authenticator app" src="${qr.createDataURL(5, 4)}">
+      <p class="muted">Can't scan? Add an account in the app and type this key (time-based):</p>
+      <div class="secret">${esc(r.secret.match(/.{1,4}/g).join(' '))}</div>` +
+      form('mfa-enable', fields([['code', '6-digit code from the app', 'text', {required: true}]]), 'Turn on two-factor');
+    const input = document.querySelector('form[data-form="mfa-enable"] input'); input.setAttribute('autocomplete', 'one-time-code'); input.focus();
+  },
+  'mfa-download'() {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([`IslandNet recovery codes for ${ME.username}\n\n${lastRecoveryCodes.join('\n')}\n`], {type: 'text/plain'}));
+    a.download = `islandnet-recovery-codes-${ME.username}.txt`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  },
+  'mfa-finish'() { closeModal(); lastRecoveryCodes = []; start(); },
+  async 'user-mfa-reset'(d) {
+    if (!confirmAct(`Reset two-factor for ${d.name}? They are signed out and must set it up again at next sign-in.`)) return;
+    await api(`/api/users/${d.id}`, 'PATCH', {reset_mfa: true}); toast('Two-factor reset'); reload();
+  },
 
   async 'island-edit'(d) {
     const i = d.id ? (await api('/api/islands')).find(x => x.id === d.id) : {};
@@ -487,6 +532,16 @@ const FORMS = {
     $('#fw-out').innerHTML = panel('Generated RouterOS script', `${r.change_id ? `<p>Change request <a href="#/change/${val(r.change_id)}">#${esc(r.change_id)}</a> created — a second admin must approve it.</p>` : '<p class="muted">Review, then paste in a Winbox terminal opened in Safe Mode, or pick a router above to apply via the change workflow.</p>'}<pre id="fw-script">${esc(r.script)}</pre>`, btn('Copy', 'copy', {target: 'fw-script'}));
   },
   async user(data) { await api('/api/users', 'POST', data); closeModal(); reload(); },
+  async 'mfa-enable'(data) {
+    const r = await api('/api/auth/mfa/enable', 'POST', {code: data.code});
+    $('#mfa-setup').innerHTML = `<p class="s-ok">Two-factor is on.</p>${btn('Continue', 'mfa-finish', {}, 'primary')}`;
+    showRecoveryCodes(r.recovery_codes, 'mfa-finish');
+  },
+  async 'mfa-regen'(data) { const r = await api('/api/auth/mfa/recovery-codes', 'POST', {code: data.code}); showRecoveryCodes(r.recovery_codes, 'mfa-finish'); },
+  async 'mfa-disable'(data) {
+    if (!confirmAct('Turn off two-factor for your account?')) return;
+    await api('/api/auth/mfa/disable', 'POST', data); toast('Two-factor turned off'); start();
+  },
   async 'my-password'(data) { const r = await api('/api/auth/password', 'POST', data); toast(r.detail); showLogin(); },
 };
 ACTIONS.copy = async d => { await navigator.clipboard.writeText(document.getElementById(d.target).textContent); toast('Copied'); };
@@ -522,6 +577,12 @@ function buildNav() {
 }
 
 async function route() {
+  if (ME.mfa_setup_required) {
+    $('#crumb').textContent = 'Security'; $('#title').textContent = 'Two-factor sign-in';
+    $('#view').innerHTML = mfaSetupPanel(`Your ${ME.role} account must use two-factor sign-in before you can continue.`);
+    $('#connection').textContent = '● API connected';
+    return;
+  }
   const [path, qs] = (location.hash.slice(2) || 'dashboard').split('?');
   const [key, id] = path.split('/');
   const page = PAGES[key] && can(PAGES[key].perm) ? PAGES[key] : PAGES.dashboard;
@@ -537,7 +598,11 @@ async function route() {
   }
 }
 
-function showLogin() { ME = null; $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); closeModal(); }
+let mfaToken = null;
+function showLogin() {
+  ME = null; mfaToken = null; $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); closeModal();
+  $('#mfa-form').classList.add('hidden'); $('#login-form').classList.remove('hidden');
+}
 
 async function start() {
   try { ME = await api('/api/auth/me'); } catch { showLogin(); return; }
@@ -550,9 +615,34 @@ $('#login-form').addEventListener('submit', async e => {
   e.preventDefault();
   $('#login-error').textContent = '';
   const f = new FormData(e.target);
-  try { await api('/api/auth/login', 'POST', {username: f.get('username'), password: f.get('password')}); e.target.reset(); start(); }
-  catch (err) { $('#login-error').textContent = err.message; }
+  try {
+    const r = await api('/api/auth/login', 'POST', {username: f.get('username'), password: f.get('password')});
+    e.target.reset();
+    if (r.mfa_required) {
+      mfaToken = r.mfa_token;
+      $('#login-form').classList.add('hidden'); $('#mfa-form').classList.remove('hidden'); $('#mfa-error').textContent = '';
+      $('#mfa-form input[name=code]').focus();
+      return;
+    }
+    start();
+  } catch (err) { $('#login-error').textContent = err.message; }
 });
+$('#mfa-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  $('#mfa-error').textContent = '';
+  const code = new FormData(e.target).get('code');
+  try {
+    const r = await api('/api/auth/login/mfa', 'POST', {mfa_token: mfaToken, code});
+    e.target.reset(); mfaToken = null;
+    await start();
+    if (r.recovery_codes_left <= 3) toast(`Only ${r.recovery_codes_left} recovery codes left. Generate new ones under My account.`, true);
+  } catch (err) {
+    e.target.reset();
+    $('#mfa-error').textContent = err.message;
+    if (/expired/i.test(err.message)) setTimeout(showLogin, 1500);
+  }
+});
+$('#mfa-back').addEventListener('click', showLogin);
 $('#logout').addEventListener('click', async () => { try { await api('/api/auth/logout', 'POST'); } finally { showLogin(); } });
 $('#modal-close').addEventListener('click', closeModal);
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });

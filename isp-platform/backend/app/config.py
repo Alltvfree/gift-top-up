@@ -37,3 +37,7 @@ ALERT_WEBHOOK_URL = os.environ.get("ALERT_WEBHOOK_URL", "")
 FOUR_EYES = os.environ.get("FOUR_EYES", "true").lower() == "true"
 # Minutes before RouterOS auto-restores the pre-change backup unless the platform confirms.
 COMMIT_CONFIRM_MINUTES = _int("COMMIT_CONFIRM_MINUTES", 5)
+
+# Two-factor: roles that must enrol TOTP before they can use anything else (comma separated).
+MFA_REQUIRED_ROLES = {r.strip() for r in os.environ.get("MFA_REQUIRED_ROLES", "admin").split(",") if r.strip()}
+MFA_ISSUER = os.environ.get("MFA_ISSUER", "IslandNet ISP")

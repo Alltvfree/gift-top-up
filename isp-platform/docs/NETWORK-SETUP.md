@@ -10,7 +10,11 @@ Roll out to one island first, then the rest.
 * Edit `frontend/allowlist.conf` to your NOC/VPN ranges.
 * `docker compose up --build -d`, then create the first admin:
   `docker compose exec api python -m app.cli create-admin yourname`
+* Sign in and set up two-factor (scan the QR code with an authenticator app, save the 10 recovery codes).
+  Admins cannot do anything else until this is done.
 * Create a second admin: config changes need a *different* admin to approve (four-eyes).
+  Lost phone and recovery codes: another admin uses *Users → Reset 2FA*; if you are the only admin,
+  `docker compose exec api python -m app.cli reset-mfa yourname` on the server.
 
 ## 1. RADIUS
 * FreeRADIUS runs in the `radius` container on UDP 1812/1813 and reads the same database.

@@ -3,6 +3,7 @@
 ## Platform
 | Threat | Control |
 |---|---|
+| Stolen admin password | Two-factor sign-in (TOTP authenticator app) mandatory for admins (`MFA_REQUIRED_ROLES`), optional for others. An admin who hasn't enrolled can only enrol until they do. Codes are single-use (replay-protected); 5 wrong codes kill the sign-in attempt and count toward the account lock. 10 single-use recovery codes; another admin (or `app.cli reset-mfa` on the server) can reset a lost phone. Secrets are encrypted at rest. |
 | Password guessing / credential stuffing | scrypt hashes; 5 failures lock an account 15 min; 20 failures from one IP in 15 min → 429; nginx `limit_req` 5/min on login; identical error and timing for unknown users |
 | Session theft / CSRF | random 256-bit token, stored hashed, HttpOnly + Secure + SameSite=Strict cookie, plus required `X-Requested-With` header on writes; sessions revoked on password change / disable |
 | XSS | strict CSP (`script-src 'self'`, no inline JS), all output escaped |
@@ -12,7 +13,10 @@
 | Router lockout on a remote island | commit-confirm: backup + auto-restore scheduler armed before every MikroTik change |
 | OLT man-in-the-middle | pinned SSH host keys, never trust-on-first-use |
 
-Known gaps to close before calling it production: MFA for admins, off-site encrypted DB backups with restore tests,
+First enrolment is trust-on-first-use: whoever first signs in to a new admin account with its password enrols the phone.
+Create admin accounts with a strong one-time password and have the person enrol straight away.
+
+Known gaps to close before calling it production: off-site encrypted DB backups with restore tests,
 HA for RADIUS (second FreeRADIUS on another island/site), log shipping, and SNMPv3 instead of v2c.
 PPPoE passwords stay in `radcheck` as cleartext because CHAP/MS-CHAPv2 need them; protect the database accordingly.
 

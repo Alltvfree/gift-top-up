@@ -7,7 +7,7 @@ Monitoring, configuration, billing and RADIUS for an island ISP:
 |---|---|
 | Monitoring | Pings every device each minute; MikroTik CPU/memory/uptime/PPPoE count/down interfaces (REST API); airFiber over SNMP; Huawei ONT state and optical levels over SSH. Island and link status roll up from devices. Alerts (unreachable, degraded, weak ONT signal) with optional webhook. |
 | Configuration | Every router/OLT write is a **change request**: requested by one person, approved by another admin, applied with a rollback. MikroTik changes arm an on-router auto-restore before applying, so a bad change on a remote island undoes itself. |
-| Security | RouterOS firewall/hardening generator (management lockdown, brute-force and port-scan blocklists, BCP38, ONT/CPE protection from botnets, customer isolation, anti-spam, open-resolver block, suspended-customer redirect) and a live **security audit** of each router. Platform: roles, lockouts, rate limits, strict CSP, encrypted device credentials, audit log. |
+| Security | Two-factor sign-in (authenticator app) required for admins. RouterOS firewall/hardening generator (management lockdown, brute-force and port-scan blocklists, BCP38, ONT/CPE protection from botnets, customer isolation, anti-spam, open-resolver block, suspended-customer redirect) and a live **security audit** of each router. Platform: roles, lockouts, rate limits, strict CSP, encrypted device credentials, audit log. |
 | Subscribers & RADIUS | Create → pending (rejected) → active (plan speed via `Mikrotik-Rate-Limit`) → suspended (256k + payment-page redirect) → cancelled. One login per account. State changes disconnect the live session (RFC 5176). |
 | Billing | Monthly invoices (MVR), payment allocation oldest-first, auto-overdue, auto-suspend after a grace period, auto-restore when paid. |
 | Smart OLT | Autofind unregistered ONTs, provision ONT + PPPoE + service-port as a reviewed change, reboot ONT, optical levels per subscriber. |
@@ -34,14 +34,14 @@ nano frontend/allowlist.conf                # your NOC / VPN ranges
 docker compose up --build -d
 docker compose exec api python -m app.cli create-admin yourname
 ```
-Open `https://<server>/`. Create a second admin (changes need another admin's approval), then follow
+Open `https://<server>/`, sign in and set up two-factor (required for admins). Create a second admin (changes need another admin's approval), then follow
 [docs/NETWORK-SETUP.md](docs/NETWORK-SETUP.md) — start with one island.
 
 Services: `db` (PostgreSQL 16), `api`, `worker` (polling + daily billing), `radius` (UDP 1812/1813), `frontend` (443).
 Never publish the platform to the internet; reach it over your management network or VPN.
 
 ## Roles
-`admin` everything · `noc` network + subscribers · `billing` plans, invoices, payments, subscribers · `support` read-only.
+`admin` everything (two-factor required) · `noc` network + subscribers · `billing` plans, invoices, payments, subscribers · `support` read-only.
 
 ## Development
 ```bash
@@ -54,4 +54,4 @@ Tested here: API, RADIUS sync, billing, firewall generator/audit, Huawei parsers
 (unit/integration tests), the UI in a browser, and FreeRADIUS 3.2 against this schema (accept/reject, plan speeds, suspended group,
 accounting, one-login-per-account, NAS reboot).
 **Not yet tested against real MikroTik, airFiber or Huawei hardware** — validate each adapter on one device before rolling out.
-See [docs/SECURITY.md](docs/SECURITY.md) for remaining production gaps (MFA, backups, RADIUS HA).
+See [docs/SECURITY.md](docs/SECURITY.md) for remaining production gaps (backups, RADIUS HA).

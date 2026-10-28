@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>IslandNet · ISP Operations</title>
 <link rel="stylesheet" href="/app.css">
+<script src="/vendor/qrcode.js" defer></script>
 <script src="/app.js" defer></script>
 </head>
 <body>
@@ -16,6 +17,15 @@
     <label>Password<input name="password" type="password" autocomplete="current-password" required maxlength="200"></label>
     <button class="btn primary" type="submit">Sign in</button>
     <div id="login-error" class="error"></div>
+  </form>
+  <form id="mfa-form" class="panel login-card hidden" autocomplete="off">
+    <div class="brand">◈ IslandNet</div>
+    <div class="subbrand">TWO-FACTOR SIGN-IN</div>
+    <p class="muted">Enter the 6-digit code from your authenticator app, or one of your recovery codes.</p>
+    <label>Code<input name="code" autocomplete="one-time-code" required maxlength="40" spellcheck="false"></label>
+    <button class="btn primary" type="submit">Verify</button>
+    <button class="link" type="button" id="mfa-back">Back to password</button>
+    <div id="mfa-error" class="error"></div>
   </form>
 </div>
 <div id="app" class="hidden">
