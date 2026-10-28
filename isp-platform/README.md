@@ -27,17 +27,21 @@ docs/               NETWORK-SETUP.md (step by step), SECURITY.md
 ```
 
 ## Run (Ubuntu + Docker Compose)
+Runs alongside other services on the same server: every host port is set in `.env`
+(defaults: web UI **8443**, HTTP redirect 8081, RADIUS 1812/1813 udp, API 8000 on loopback only — nothing on 80, 443 or 8080).
 ```bash
 cp .env.example .env && chmod 600 .env     # fill every value; back up APP_SECRET_KEY
+./scripts/check-ports.sh                    # are those ports free? does the Docker subnet clash?
 ./scripts/make-selfsigned-cert.sh noc.example.local
 nano frontend/allowlist.conf                # your NOC / VPN ranges
 docker compose up --build -d
 docker compose exec api python -m app.cli create-admin yourname
 ```
-Open `https://<server>/`, sign in and set up two-factor (required for admins). Create a second admin (changes need another admin's approval), then follow
+Open `https://<server>:8443/` (or your `HTTPS_PORT`), sign in and set up two-factor (required for admins). Create a second admin (changes need another admin's approval), then follow
 [docs/NETWORK-SETUP.md](docs/NETWORK-SETUP.md) — start with one island.
 
-Services: `db` (PostgreSQL 16), `api`, `worker` (polling + daily billing), `radius` (UDP 1812/1813), `frontend` (443).
+Services: `db` (PostgreSQL 16), `api`, `worker` (polling + daily billing), `radius` (UDP), `frontend` (nginx). The Compose
+project is named `isp-platform`, so its containers, volume and network never mix with your other Compose projects.
 Never publish the platform to the internet; reach it over your management network or VPN.
 
 ## Roles

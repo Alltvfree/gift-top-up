@@ -33,6 +33,8 @@ class FirewallRequest(BaseModel):
     pppoe_service_name: str = "isp"
     radius_secret: str | None = None
     radius_src_address: str | None = None
+    radius_auth_port: int = Field(default=1812, ge=1, le=65535)
+    radius_acct_port: int = Field(default=1813, ge=1, le=65535)
     local_address: str | None = None
     # Optional: turn the script straight into a change request for this device.
     device_id: UUID | None = None

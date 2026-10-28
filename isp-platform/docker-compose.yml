@@ -1,4 +1,6 @@
-# Production-ish layout. Only nginx (443) and RADIUS (1812/1813 udp) listen outside the host.
+# Every host port comes from .env so this can sit next to other services on the same server.
+# Only the web UI and RADIUS listen outside the host; the API is bound to loopback.
+name: isp-platform
 x-app-env: &app-env
   DATABASE_URL: ${DATABASE_URL}
   APP_SECRET_KEY: ${APP_SECRET_KEY}
@@ -7,6 +9,8 @@ x-app-env: &app-env
   AIRFIBER_OIDS: ${AIRFIBER_OIDS:-{}}
   POLL_INTERVAL_S: ${POLL_INTERVAL_S:-60}
   FOUR_EYES: ${FOUR_EYES:-true}
+  # nginx's address range: X-Real-IP is trusted only from here (per-IP login throttling)
+  TRUSTED_PROXY_NETS: ${DOCKER_SUBNET:-172.31.250.0/24}
   MFA_REQUIRED_ROLES: ${MFA_REQUIRED_ROLES:-admin}
   MFA_ISSUER: ${MFA_ISSUER:-IslandNet ISP}
 
@@ -32,7 +36,7 @@ services:
     restart: unless-stopped
     environment: *app-env
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${API_LOCAL_PORT:-8000}:8000"
     depends_on:
       db: { condition: service_healthy }
     networks: [private]
@@ -54,17 +58,19 @@ services:
       RADIUS_DB_PASSWORD: ${RADIUS_DB_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "1812:1812/udp"
-      - "1813:1813/udp"
+      - "${RADIUS_AUTH_PORT:-1812}:1812/udp"
+      - "${RADIUS_ACCT_PORT:-1813}:1813/udp"
     depends_on: [api]   # api sets the radius role password on start
     networks: [private]
 
   frontend:
     build: ./frontend
     restart: unless-stopped
+    environment:
+      PUBLIC_HTTPS_PORT: ${HTTPS_PORT:-8443}   # used in the http -> https redirect
     ports:
-      - "443:443"
-      - "80:80"
+      - "${HTTPS_PORT:-8443}:443"
+      - "${HTTP_PORT:-8081}:80"
     volumes:
       - ./certs:/etc/nginx/certs:ro
     depends_on: [api]
@@ -75,3 +81,8 @@ volumes:
 networks:
   private:
     driver: bridge
+    # Pin the subnet so Docker never picks one that overlaps an island management range
+    # (a clash makes those routers unreachable from the platform). Change if it collides.
+    ipam:
+      config:
+        - subnet: ${DOCKER_SUBNET:-172.31.250.0/24}

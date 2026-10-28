@@ -22,6 +22,9 @@ def test_island_firewall_contents():
     assert "psd=21,3s,3,1" in s
     assert "/radius incoming set accept=yes port=3799" in s
     assert 'secret="S3cret-island-01"' in s
+    assert "authentication-port=1812 accounting-port=1813" in s
+    moved = firewall.generate(firewall.FirewallInput(**{**ISLAND, "radius_auth_port": 11812, "radius_acct_port": 11813}))
+    assert "authentication-port=11812 accounting-port=11813" in moved
     assert "interface-list=CUSTOMER" in s
     lines = [ln for ln in s.splitlines() if "chain=input" in ln]
     assert lines[-1].startswith("add chain=input action=drop")

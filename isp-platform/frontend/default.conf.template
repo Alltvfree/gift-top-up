@@ -1,3 +1,5 @@
+# Template: the nginx image substitutes ${PUBLIC_HTTPS_PORT} at start (only defined env vars are replaced,
+# so nginx variables like $host are left alone).
 server_tokens off;
 limit_req_zone $binary_remote_addr zone=login:10m rate=5r/m;
 limit_req_zone $binary_remote_addr zone=api:10m rate=20r/s;
@@ -15,7 +17,7 @@ server {
     listen 80;
     server_name _;
     include /etc/nginx/allowlist.conf;
-    return 301 https://$host$request_uri;
+    return 301 https://$host:${PUBLIC_HTTPS_PORT}$request_uri;
 }
 
 server {

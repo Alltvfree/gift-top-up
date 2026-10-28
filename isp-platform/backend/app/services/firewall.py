@@ -47,6 +47,8 @@ class FirewallInput:
     pppoe_service_name: str = "isp"
     radius_secret: str | None = None
     radius_src_address: str | None = None
+    radius_auth_port: int = 1812               # match RADIUS_AUTH_PORT / RADIUS_ACCT_PORT in the platform .env
+    radius_acct_port: int = 1813
     local_address: str | None = None           # PPP profile local-address (router side)
 
     def validate(self):
@@ -70,6 +72,9 @@ class FirewallInput:
             raise ValueError("Do not use public/private as the SNMP community")
         if self.radius_secret and not SECRET_RE.match(self.radius_secret):
             raise ValueError("RADIUS secret must be 8-64 chars of letters, digits and ._@#%+=-")
+        for port in (self.radius_auth_port, self.radius_acct_port):
+            if not isinstance(port, int) or not 1 <= port <= 65535:
+                raise ValueError("RADIUS ports must be 1-65535")
         if self.routing_protocol not in ("ospf", "bgp", "none"):
             raise ValueError("routing_protocol must be ospf, bgp or none")
         if self.role == "island_router" and not self.customer_interfaces:
@@ -247,6 +252,7 @@ def generate(cfg: FirewallInput) -> str:
             add("# radius_secret not given: add /radius entries by hand")
         else:
             src = f" src-address={cfg.radius_src_address}" if cfg.radius_src_address else ""
+            src += f" authentication-port={cfg.radius_auth_port} accounting-port={cfg.radius_acct_port}"
             add(f'/radius remove [find where comment="{TAG}"]')
             for r in cfg.radius_servers:
                 add(f'/radius add service=ppp address={r} secret="{cfg.radius_secret}"{src} timeout=3s comment="{TAG}"')

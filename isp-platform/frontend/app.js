@@ -296,6 +296,8 @@ const PAGES = {
       ['local_address', 'PPP local address (router side)', 'text'],
       ['radius_secret', 'RADIUS secret (island)', 'password'],
       ['radius_src_address', 'RADIUS source address', 'text'],
+      ['radius_auth_port', 'RADIUS auth port (RADIUS_AUTH_PORT)', 'number', {default: 1812}],
+      ['radius_acct_port', 'RADIUS accounting port (RADIUS_ACCT_PORT)', 'number', {default: 1813}],
       ['snmp_community', 'SNMP community (not public)', 'password'],
       ['pppoe_service_name', 'PPPoE service name', 'text', {default: 'isp'}],
       ['dns_cache', 'Router is DNS cache for customers', 'check', {default: true}],

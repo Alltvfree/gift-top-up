@@ -4,8 +4,22 @@ Your path: **FreeRADIUS (core) ← core MikroTik → fiber / airFiber → island
 Roll out to one island first, then the rest.
 
 ## 0. Platform server
-* Ubuntu VM in the core, on the management network, with routes to every island's management subnet.
+* Ubuntu server/VM in the core with Docker + Compose v2, on the management network, with routes to every island's management subnet.
+  It can share the server with other services (e.g. something already on 8080).
 * `cp .env.example .env`, fill every value (generate `APP_SECRET_KEY` and **back it up** — it decrypts all stored device passwords).
+* Ports — set in `.env`, then run `./scripts/check-ports.sh`:
+
+  | Setting | Default | What |
+  |---|---|---|
+  | `HTTPS_PORT` | 8443 | web UI → `https://<server>:8443` |
+  | `HTTP_PORT` | 8081 | only redirects to `HTTPS_PORT` |
+  | `API_LOCAL_PORT` | 8000 | loopback only (health checks from the host) |
+  | `RADIUS_AUTH_PORT` / `RADIUS_ACCT_PORT` | 1812 / 1813 udp | if your existing core RADIUS runs **on this same server**, pick e.g. 11812/11813 and set the same ports in *Security* when generating the island config |
+  | `DOCKER_SUBNET` | 172.31.250.0/24 | internal network; must not overlap any island/management subnet, or those routers become unreachable from the platform |
+
+  Changing a port later: edit `.env`, then `docker compose up -d` (no rebuild needed).
+* Host firewall: Docker-published ports **bypass ufw**. Access to the UI is limited by `frontend/allowlist.conf`;
+  for RADIUS, restrict UDP to your NAS addresses on the core MikroTik or with iptables `DOCKER-USER` rules.
 * `./scripts/make-selfsigned-cert.sh noc.example.local` (or put your internal CA cert in `certs/`).
 * Edit `frontend/allowlist.conf` to your NOC/VPN ranges.
 * `docker compose up --build -d`, then create the first admin:
