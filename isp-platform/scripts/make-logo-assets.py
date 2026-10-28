@@ -1,7 +1,7 @@
-# Regenerate frontend/assets from a logo on a white background:
-#   python3 scripts/make-logo-assets.py logo.jpg frontend/assets   (needs: pip install pillow)
-# Produces satlink-logo-dark.png (white lettering for the dark UI), satlink-logo.png (transparent,
-# original colours) and favicon.png (the swoosh mark).
+# The UI shows the official logo unaltered (frontend/assets/satlink-logo.jpg).
+# This script only builds frontend/assets/favicon.png (the swoosh mark) from it:
+#   python3 scripts/make-logo-assets.py frontend/assets/satlink-logo.jpg /tmp/out && cp /tmp/out/favicon.png frontend/assets/
+# (needs: pip install pillow; it also writes recoloured logo variants to the output folder, unused by the UI)
 import sys
 from PIL import Image
 src, outdir = sys.argv[1], sys.argv[2]
