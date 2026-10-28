@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IslandNet · ISP Operations</title>
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<div id="login" class="login hidden">
+  <form id="login-form" class="panel login-card" autocomplete="on">
+    <div class="brand">◈ IslandNet</div>
+    <div class="subbrand">ISP OPERATIONS · MALDIVES</div>
+    <label>Username<input name="username" autocomplete="username" required maxlength="40"></label>
+    <label>Password<input name="password" type="password" autocomplete="current-password" required maxlength="200"></label>
+    <button class="btn primary" type="submit">Sign in</button>
+    <div id="login-error" class="error"></div>
+  </form>
+</div>
+<div id="app" class="hidden">
+  <aside>
+    <div class="brand">◈ IslandNet</div>
+    <div class="subbrand">ISP OPERATIONS · MALDIVES</div>
+    <nav id="nav"></nav>
+    <div class="me"><span id="me"></span><button class="link" id="logout">Sign out</button></div>
+  </aside>
+  <main>
+    <div class="top">
+      <div><div class="muted">Operations / <span id="crumb"></span></div><h1 id="title"></h1></div>
+      <span class="pill" id="connection">● Connecting</span>
+    </div>
+    <div id="view"></div>
+  </main>
+</div>
+<div id="modal" class="modal hidden"><div class="modal-body panel"><button class="link close" id="modal-close">✕</button><div id="modal-content"></div></div></div>
+<div id="toast" class="toast hidden"></div>
+</body>
+</html>

@@ -1,0 +1,41 @@
+# FreeRADIUS 3.2 rlm_sql -> PostgreSQL (shared with the platform). Mounted as /etc/raddb/mods-enabled/sql.
+sql {
+	dialect = "postgresql"
+	driver = "rlm_sql_${dialect}"
+
+	server = "db"
+	port = 5432
+	login = "radius"
+	password = $ENV{RADIUS_DB_PASSWORD}
+	radius_db = $ENV{POSTGRES_DB}
+
+	acct_table1 = "radacct"
+	acct_table2 = "radacct"
+	postauth_table = "radpostauth"
+	authcheck_table = "radcheck"
+	groupcheck_table = "radgroupcheck"
+	authreply_table = "radreply"
+	groupreply_table = "radgroupreply"
+	usergroup_table = "radusergroup"
+	read_groups = yes
+	read_profiles = yes
+	delete_stale_sessions = yes
+
+	# NAS clients (island MikroTiks) come from the nas table, managed in the platform UI.
+	read_clients = yes
+	client_table = "nas"
+
+	pool {
+		start = 2
+		min = 2
+		max = 16
+		spare = 4
+		uses = 0
+		retry_delay = 30
+		lifetime = 0
+		idle_timeout = 60
+	}
+
+	group_attribute = "SQL-Group"
+	$INCLUDE ${modconfdir}/${.:name}/main/${dialect}/queries.conf
+}

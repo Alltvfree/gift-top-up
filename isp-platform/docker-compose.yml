@@ -1,0 +1,75 @@
+# Production-ish layout. Only nginx (443) and RADIUS (1812/1813 udp) listen outside the host.
+x-app-env: &app-env
+  DATABASE_URL: ${DATABASE_URL}
+  APP_SECRET_KEY: ${APP_SECRET_KEY}
+  RADIUS_DB_PASSWORD: ${RADIUS_DB_PASSWORD}
+  ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+  AIRFIBER_OIDS: ${AIRFIBER_OIDS:-{}}
+  POLL_INTERVAL_S: ${POLL_INTERVAL_S:-60}
+  FOUR_EYES: ${FOUR_EYES:-true}
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [private]
+
+  api:
+    build: { context: ., dockerfile: backend/Dockerfile }
+    restart: unless-stopped
+    environment: *app-env
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [private]
+
+  # Polling + daily billing. Needs routes to every island's management network.
+  worker:
+    build: { context: ., dockerfile: backend/Dockerfile }
+    command: ["python", "-m", "app.worker"]
+    restart: unless-stopped
+    environment: *app-env
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [private]
+
+  radius:
+    build: { context: ., dockerfile: radius/Dockerfile }
+    restart: unless-stopped
+    environment:
+      RADIUS_DB_PASSWORD: ${RADIUS_DB_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "1812:1812/udp"
+      - "1813:1813/udp"
+    depends_on: [api]   # api sets the radius role password on start
+    networks: [private]
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
+    depends_on: [api]
+    networks: [private]
+
+volumes:
+  postgres_data:
+networks:
+  private:
+    driver: bridge
