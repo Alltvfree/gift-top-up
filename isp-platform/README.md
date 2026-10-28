@@ -1,4 +1,4 @@
-# IslandNet — ISP operations platform
+# SatLink — ISP operations platform
 
 Monitoring, configuration, billing and RADIUS for an island ISP:
 **core RADIUS + core MikroTik → fiber / airFiber → island MikroTik (PPPoE) → Huawei OLT → ONT (PPPoE)**.

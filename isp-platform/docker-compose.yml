@@ -12,7 +12,7 @@ x-app-env: &app-env
   # nginx's address range: X-Real-IP is trusted only from here (per-IP login throttling)
   TRUSTED_PROXY_NETS: ${DOCKER_SUBNET:-172.31.250.0/24}
   MFA_REQUIRED_ROLES: ${MFA_REQUIRED_ROLES:-admin}
-  MFA_ISSUER: ${MFA_ISSUER:-IslandNet ISP}
+  MFA_ISSUER: ${MFA_ISSUER:-SatLink}
 
 services:
   db:

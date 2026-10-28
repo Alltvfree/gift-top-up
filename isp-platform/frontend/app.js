@@ -1,5 +1,5 @@
 'use strict';
-/* IslandNet operations UI. No inline handlers (strict CSP): clicks/submits go through data-act / data-form. */
+/* SatLink operations UI. No inline handlers (strict CSP): clicks/submits go through data-act / data-form. */
 const $ = s => document.querySelector(s);
 const ESC = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'};
 const esc = v => (v === null || v === undefined || v === '') ? '—' : String(v).replace(/[&<>"']/g, c => ESC[c]);
@@ -371,8 +371,8 @@ const ACTIONS = {
   },
   'mfa-download'() {
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([`IslandNet recovery codes for ${ME.username}\n\n${lastRecoveryCodes.join('\n')}\n`], {type: 'text/plain'}));
-    a.download = `islandnet-recovery-codes-${ME.username}.txt`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    a.href = URL.createObjectURL(new Blob([`SatLink recovery codes for ${ME.username}\n\n${lastRecoveryCodes.join('\n')}\n`], {type: 'text/plain'}));
+    a.download = `satlink-recovery-codes-${ME.username}.txt`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   },
   'mfa-finish'() { closeModal(); lastRecoveryCodes = []; start(); },
   async 'user-mfa-reset'(d) {

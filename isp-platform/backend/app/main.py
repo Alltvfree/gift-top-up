@@ -20,7 +20,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="IslandNet ISP Operations API", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None,
+app = FastAPI(title="SatLink Operations API", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None,
               lifespan=lifespan)
 for r in (auth.router, auth.users, inventory.router, subscribers.router, billing.router, radius.router,
           monitoring.router, olt.router, changes.router, security.router):
