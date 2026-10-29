@@ -452,9 +452,22 @@ const PAGES = {
         (ME.mfa_required_for_role
           ? `<p class="muted">Two-factor is required for the ${esc(ME.role)} role. Lost your phone? Sign in with a recovery code, or ask another admin to reset your two-factor.</p>`
           : '<h3>Turn off</h3>' + form('mfa-disable', fields([['password', 'Password', 'password', {required: true}], ...codeField]), 'Turn off two-factor')));
-    return mfa + panel('Change password', form('my-password', fields([['current_password', 'Current password', 'password', {required: true}], ['new_password', 'New password (12+, upper/lower/digit)', 'password', {required: true}]]), 'Change password'));
+    return mfa + telegramPanel(await api('/api/auth/telegram')) + panel('Change password', form('my-password', fields([['current_password', 'Current password', 'password', {required: true}], ['new_password', 'New password (12+, upper/lower/digit)', 'password', {required: true}]]), 'Change password'));
   }},
 };
+
+// ---------------------------------------------------------------- Telegram
+function telegramPanel(t) {
+  if (!t.enabled) return panel('Telegram', `<p class="muted">Not set up on this server. An admin creates a bot with @BotFather and puts its token in
+    <code>.env</code> as <code>TELEGRAM_BOT_TOKEN</code>, then runs <code>docker compose up -d</code>.</p>`);
+  const what = t.can_approve
+    ? `Change requests arrive with <b>Approve</b> / <b>Reject</b> buttons; approving or applying asks for your 6-digit two-factor code.${t.self_approve ? ' You may approve your own changes there.' : ''}`
+    : 'You get alerts there.';
+  if (!t.linked) return panel('Telegram', `<p>${what}</p><div id="tg-link">${btn('Connect Telegram', 'tg-link', {}, 'primary')}</div>`);
+  return panel('Telegram', `<p>Connected to <b>${esc(t.name || 'Telegram')}</b> ${ago(t.linked_at)}.</p><p class="muted">${what}</p>` +
+    fields([['alerts', 'Send me monitoring and threat alerts', 'check', {default: t.alerts}]]).replace('data-type="check"', 'data-type="check" data-act-change="tg-alerts"'),
+    btn('Disconnect', 'tg-unlink', {}, 'danger'));
+}
 
 // ---------------------------------------------------------------- two-factor
 let lastRecoveryCodes = [];
@@ -512,6 +525,25 @@ const ACTIONS = {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([`SatLink recovery codes for ${ME.username}\n\n${lastRecoveryCodes.join('\n')}\n`], {type: 'text/plain'}));
     a.download = `satlink-recovery-codes-${ME.username}.txt`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  },
+  async 'tg-link'() {
+    const r = await api('/api/auth/telegram/link', 'POST');
+    if (!r.link) {
+      $('#tg-link').innerHTML = `<p>The bot has not started yet. In Telegram, open your bot and send:</p><div class="secret">/start ${esc(r.code)}</div>`;
+      return;
+    }
+    const qr = qrcode(0, 'M'); qr.addData(r.link); qr.make();
+    $('#tg-link').innerHTML = `<p><a class="btn primary" href="${val(r.link)}" target="_blank" rel="noopener">Open @${esc(r.bot_username)} in Telegram</a></p>
+      <p class="muted">On a computer? Scan this with your phone. Then press <b>Start</b> in Telegram. The link works once, for ${esc(r.minutes)} minutes.</p>
+      <img class="qr" alt="QR code linking to the Telegram bot" src="${qr.createDataURL(5, 4)}">
+      <p>${btn('I pressed Start', 'tg-check')}</p>`;
+  },
+  async 'tg-check'() {
+    if ((await api('/api/auth/telegram')).linked) { toast('Telegram connected'); reload(); } else toast('Not connected yet. Press Start in Telegram first.', true);
+  },
+  async 'tg-unlink'() {
+    if (!confirmAct('Disconnect Telegram? You will no longer get approvals or alerts there.')) return;
+    await api('/api/auth/telegram', 'DELETE'); toast('Telegram disconnected'); reload();
   },
   'mfa-finish'() { closeModal(); lastRecoveryCodes = []; start(); },
   async 'user-mfa-reset'(d) {
@@ -770,9 +802,12 @@ document.addEventListener('click', async e => {
   try { await ACTIONS[el.dataset.act]({...el.dataset}, el); } catch (err) { toast(err.message, true); }
 });
 document.addEventListener('change', async e => {
-  const el = e.target.closest('[data-act-change="user-role"]');
+  const el = e.target.closest('[data-act-change]');
   if (!el) return;
-  try { await api(`/api/users/${el.dataset.id}`, 'PATCH', {role: el.value}); toast('Role updated'); } catch (err) { toast(err.message, true); reload(); }
+  try {
+    if (el.dataset.actChange === 'user-role') { await api(`/api/users/${el.dataset.id}`, 'PATCH', {role: el.value}); toast('Role updated'); }
+    if (el.dataset.actChange === 'tg-alerts') { await api('/api/auth/telegram/alerts', 'PUT', {enabled: el.checked}); toast(el.checked ? 'Telegram alerts on' : 'Telegram alerts off'); }
+  } catch (err) { toast(err.message, true); reload(); }
 });
 document.addEventListener('submit', async e => {
   const f = e.target.closest('form[data-form]');

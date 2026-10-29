@@ -34,7 +34,13 @@ LATENCY_WARN_MS = float(os.environ.get("LATENCY_WARN_MS", "80"))
 ALERT_WEBHOOK_URL = os.environ.get("ALERT_WEBHOOK_URL", "")
 
 # Change workflow: requester may not approve their own change.
-FOUR_EYES = os.environ.get("FOUR_EYES", "true").lower() == "true"
+#   true      another admin must approve (web or Telegram)
+#   telegram  as true, but the requester may approve their own change in Telegram with their 2FA code
+#             (a deliberate second confirmation on a second device, for a one-admin team)
+#   false     anyone with approve rights may approve anything
+FOUR_EYES_MODE = os.environ.get("FOUR_EYES", "true").strip().lower()
+FOUR_EYES = FOUR_EYES_MODE != "false"
+SELF_APPROVE_VIA_TELEGRAM = FOUR_EYES_MODE == "telegram"
 # Minutes before RouterOS auto-restores the pre-change backup unless the platform confirms.
 COMMIT_CONFIRM_MINUTES = _int("COMMIT_CONFIRM_MINUTES", 5)
 
@@ -63,3 +69,8 @@ SMS_REMINDER_DAYS = _int("SMS_REMINDER_DAYS", 3)     # due_reminder this many da
 ONT_RX_GOOD = float(os.environ.get("ONT_RX_GOOD", "-25"))
 ONT_RX_ACCEPTABLE = float(os.environ.get("ONT_RX_ACCEPTABLE", "-27"))
 ONT_RX_WEAK = float(os.environ.get("ONT_RX_WEAK", "-29"))
+
+# Telegram bot (from @BotFather): change approvals and alerts. Empty = Telegram off.
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+# Optional link to the portal in Telegram messages, e.g. https://172.17.205.188:8443
+PORTAL_URL = os.environ.get("PORTAL_URL", "").strip().rstrip("/")

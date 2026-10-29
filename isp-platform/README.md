@@ -10,6 +10,7 @@ Monitoring, configuration, billing and RADIUS for an island ISP:
 | Security | **Threat protection**: hosts brute-forcing router logins are detected from MikroTik logs and blocked on every router (rotating bots: whole /24). Two-factor sign-in (authenticator app) required for admins. RouterOS firewall/hardening generator (management lockdown, brute-force and port-scan blocklists, BCP38, ONT/CPE protection from botnets, customer isolation, anti-spam, open-resolver block, suspended-customer redirect) and a live **security audit** of each router. Platform: roles, lockouts, rate limits, strict CSP, encrypted device credentials, audit log. |
 | Subscribers & RADIUS | Create → pending (rejected) → active (plan speed via `Mikrotik-Rate-Limit`) → suspended (256k + payment-page redirect) → cancelled. One login per account. State changes disconnect the live session (RFC 5176). |
 | Billing | Monthly invoices (MVR), payment allocation oldest-first, auto-overdue, auto-suspend after a grace period, auto-restore when paid. |
+| Telegram | Router/OLT change requests arrive in Telegram with **Approve / Approve & apply / Reject** buttons; approving or applying asks for your 6-digit two-factor code (deleted from the chat after use) and the result comes back in the chat. Alerts and threat blocks too. Each user links their own chat in **My account**. |
 | SMS (MessageOwl) | Automatic invoice / reminder / payment / suspended / restored messages (editable templates), one-off SMS, outage notices to a whole island in bulk, full message log. |
 | Import from DMA | CSV import of subscribers and NAS from DMA Radius Manager with a dry-run preview; imported customers stay billed by DMA until switched over ([docs/MIGRATE-FROM-DMA.md](docs/MIGRATE-FROM-DMA.md)). |
 | Smart OLT | All OLTs at a glance; per-OLT dashboard (waiting authorization, online/offline, good/acceptable/weak/bad signal) with a filterable ONT list (port, status, signal, description/serial/account search); per-ONT live signal, read config, reboot, enable/disable (audited); autofind + provisioning as reviewed changes. Parser verified against real MA5608T output. |
@@ -42,9 +43,17 @@ docker compose exec api python -m app.cli create-admin yourname
 Open `https://<server>:8443/` (or your `HTTPS_PORT`), sign in and set up two-factor (required for admins). Create a second admin (changes need another admin's approval), then follow
 [docs/NETWORK-SETUP.md](docs/NETWORK-SETUP.md) — start with one island.
 
-Services: `db` (PostgreSQL 16), `api`, `worker` (polling + daily billing), `radius` (UDP), `frontend` (nginx). The Compose
+Services: `db` (PostgreSQL 16), `api`, `worker` (polling + daily billing), `telegram` (bot; idle until `TELEGRAM_BOT_TOKEN` is set), `radius` (UDP), `frontend` (nginx). The Compose
 project is named `isp-platform`, so its containers, volume and network never mix with your other Compose projects.
 Never publish the platform to the internet; reach it over your management network or VPN.
+
+## Telegram approvals
+1. In Telegram, open **@BotFather** → `/newbot` → copy the token.
+2. In `.env`: `TELEGRAM_BOT_TOKEN=<token>` (and optionally `PORTAL_URL=https://<server>:8443`), then `docker compose up -d`.
+3. Each admin: **My account → Connect Telegram** → press **Start** in Telegram.
+
+`FOUR_EYES=true` (default): a change goes to every *other* linked admin. Working alone? `FOUR_EYES=telegram` lets you approve
+your own change, but only in Telegram with your 2FA code. The portal still refuses it, so approval always takes a second device.
 
 ## Roles
 `admin` everything (two-factor required) · `noc` network + subscribers · `billing` plans, invoices, payments, subscribers · `support` read-only.

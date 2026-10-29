@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from .. import audit, config, db, totp
+from ..services import telegram
 from ..deps import COOKIE, ROLES, client_ip, current_user, require
 from ..security import (decrypt_json, encrypt_json, hash_password, new_session_token, password_problem, token_hash,
                         verify_dummy, verify_password)
@@ -255,6 +256,46 @@ class UserPatch(BaseModel):
     active: bool | None = None
     password: str | None = Field(default=None, max_length=200)
     reset_mfa: bool = False  # lost phone: user re-enrols at next sign-in
+
+
+# ---- Telegram (change approvals + alerts)
+class TelegramAlerts(BaseModel):
+    enabled: bool
+
+
+@router.get("/telegram")
+def telegram_status(user=Depends(current_user)):
+    with db.connect() as conn:
+        u = conn.execute("SELECT telegram_chat_id IS NOT NULL AS linked, telegram_name, telegram_linked_at, telegram_alerts FROM users WHERE id=%s",
+                         (user["id"],)).fetchone()
+        return {"enabled": telegram.enabled(), "bot_username": telegram.bot_username(conn), "linked": u["linked"],
+                "name": u["telegram_name"], "linked_at": u["telegram_linked_at"], "alerts": u["telegram_alerts"],
+                "can_approve": "approve" in ROLES[user["role"]], "self_approve": config.SELF_APPROVE_VIA_TELEGRAM}
+
+
+@router.post("/telegram/link")
+def telegram_link(user=Depends(current_user)):
+    if not telegram.enabled():
+        raise HTTPException(409, "Telegram is not set up on this server (TELEGRAM_BOT_TOKEN in .env)")
+    with db.connect() as conn:
+        code = telegram.new_link_code(conn, user["id"])
+        bot = telegram.bot_username(conn)
+        audit.record(user["username"], "telegram.link_code", "user", user["id"], conn=conn)
+    return {"code": code, "bot_username": bot, "link": f"https://t.me/{bot}?start={code}" if bot else None,
+            "minutes": telegram.LINK_MINUTES}
+
+
+@router.delete("/telegram")
+def telegram_unlink(user=Depends(current_user)):
+    with db.connect() as conn:
+        telegram.unlink(conn, user["id"], user["username"])
+    return {"ok": True}
+
+
+@router.put("/telegram/alerts")
+def telegram_alerts(body: TelegramAlerts, user=Depends(current_user)):
+    db.run("UPDATE users SET telegram_alerts=%s WHERE id=%s", (body.enabled, user["id"]))
+    return {"ok": True}
 
 
 users = APIRouter(prefix="/api/users", tags=["users"])

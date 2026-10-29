@@ -20,6 +20,15 @@ Known gaps to close before calling it production: off-site encrypted DB backups 
 HA for RADIUS (second FreeRADIUS on another island/site), log shipping, and SNMPv3 instead of v2c.
 PPPoE passwords stay in `radcheck` as cleartext because CHAP/MS-CHAPv2 need them; protect the database accordingly.
 
+## Telegram bot
+- Long-polls Telegram (outbound HTTPS only); the platform needs no public address and Telegram never connects in.
+- Serves only **private chats linked to an active user** through a one-time code (10 min, stored hashed) made in My account.
+  Groups are ignored. Role and four-eyes rules are checked on every button press, the same as in the portal.
+- **Approve and apply need the user's current TOTP code** (replay-protected, 3 tries, failures count towards the account
+  lock); the bot deletes the code message. Reject needs no code. Every action is audited with `via: telegram`.
+- The token sits only in `.env` and request URLs; httpx request logging is off in the bot, and errors are redacted.
+- Lost phone / Telegram account: Disconnect in My account (or an admin deactivates the user). The 2FA code is still required.
+
 ## Threat protection (network-wide blocklist)
 Every poll (1 min) the worker reads new `login failure for user … from <IP> via winbox|ssh|api` lines from each
 MikroTik's log. A public IP with `THREAT_FAILURES` failures within `THREAT_WINDOW_MIN` is blocked on **all**

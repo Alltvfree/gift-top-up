@@ -21,6 +21,8 @@ x-app-env: &app-env
   THREAT_BLOCK_HOURS: ${THREAT_BLOCK_HOURS:-168}
   THREAT_SUBNET_AFTER: ${THREAT_SUBNET_AFTER:-3}
   THREAT_NEVER_BLOCK: ${THREAT_NEVER_BLOCK:-}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  PORTAL_URL: ${PORTAL_URL:-}
 
 services:
   db:
@@ -53,6 +55,16 @@ services:
   worker:
     build: { context: ., dockerfile: backend/Dockerfile }
     command: ["python", "-m", "app.worker"]
+    restart: unless-stopped
+    environment: *app-env
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [private]
+
+  # Telegram bot: change approvals (2FA code) and alerts. Outbound HTTPS to api.telegram.org only.
+  telegram:
+    build: { context: ., dockerfile: backend/Dockerfile }
+    command: ["python", "-m", "app.telegram_bot"]
     restart: unless-stopped
     environment: *app-env
     depends_on:

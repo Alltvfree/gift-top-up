@@ -4,9 +4,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import audit, config, db
+from .. import audit, db
 from ..deps import require
-from ..services import changes
+from ..services import changes, telegram
 
 router = APIRouter(prefix="/api/changes", tags=["changes"])
 
@@ -29,6 +29,7 @@ def create_change(conn, device_id, title, kind, plan, rollback, username) -> int
         "INSERT INTO config_changes(device_id,title,kind,plan,rollback,requested_by) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
         (device_id, title, kind, plan, rollback, username)).fetchone()
     audit.record(username, "change.request", "config_change", row["id"], {"title": title}, conn=conn)
+    telegram.change_requested(conn, row["id"])
     return row["id"]
 
 
@@ -55,23 +56,20 @@ def request_change(body: ChangeIn, user=Depends(require("network"))):
 @router.post("/{change_id}/approve")
 def approve(change_id: int, user=Depends(require("approve"))):
     with db.connect() as conn:
-        ch = conn.execute("SELECT * FROM config_changes WHERE id=%s FOR UPDATE", (change_id,)).fetchone()
-        if not ch or ch["status"] != "pending":
-            raise HTTPException(409, "Only pending changes can be approved")
-        if config.FOUR_EYES and ch["requested_by"] == user["username"]:
-            raise HTTPException(403, "Four-eyes rule: someone else must approve your change")
-        conn.execute("UPDATE config_changes SET status='approved', approved_by=%s WHERE id=%s", (user["username"], change_id))
-        audit.record(user["username"], "change.approve", "config_change", change_id, conn=conn)
+        try:
+            changes.approve(conn, change_id, user["username"])
+        except changes.ChangeError as exc:
+            raise HTTPException(exc.status, exc.detail) from None
     return {"ok": True}
 
 
 @router.post("/{change_id}/reject")
 def reject(change_id: int, user=Depends(require("approve"))):
     with db.connect() as conn:
-        if not conn.execute("UPDATE config_changes SET status='rejected', approved_by=%s WHERE id=%s AND status IN ('pending','approved') RETURNING id",
-                            (user["username"], change_id)).fetchone():
-            raise HTTPException(409, "Change cannot be rejected now")
-        audit.record(user["username"], "change.reject", "config_change", change_id, conn=conn)
+        try:
+            changes.reject(conn, change_id, user["username"])
+        except changes.ChangeError as exc:
+            raise HTTPException(exc.status, exc.detail) from None
     return {"ok": True}
 
 

@@ -11,7 +11,7 @@ from ..adapters import airfiber
 from ..adapters.ping import ping
 from ..security import decrypt_json
 from . import devices as dev
-from . import threats
+from . import telegram, threats
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +76,11 @@ def poll_olt(device: dict) -> dict:
 
 
 def _notify(text: str):
+    try:
+        with db.connect() as conn:
+            telegram.alert(conn, text)
+    except Exception as exc:
+        log.warning("telegram alert not queued: %s", exc)
     if not config.ALERT_WEBHOOK_URL:
         return
     try:
