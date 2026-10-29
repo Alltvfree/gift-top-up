@@ -151,3 +151,50 @@ def test_empty_answers_and_yes_no():
     with pytest.raises(huawei.OLTError, match="yes/no"):
         yn._read_until_prompt()
     assert yn.shell.sent[-1] == "n\n"
+
+
+OPT = (Path(__file__).parent / "fixtures" / "ma5608t_optical.txt").read_text()
+OPT_SINGLE, rest = OPT.split("===TABLE===")
+OPT_TABLE, OPT_CONFIG = rest.split("===CONFIG===")
+
+
+def test_real_optical_single_and_table():
+    one = huawei.parse_optical(OPT_SINGLE)
+    assert one == {"rx_power_dbm": -19.95, "tx_power_dbm": 2.06, "olt_rx_power_dbm": -22.30,
+                   "temperature_c": 55.0, "voltage_v": 3.28, "bias_ma": 8.0}   # threshold lines are not mistaken for values
+    table = huawei.parse_optical_table(OPT_TABLE)
+    assert sorted(table) == [3, 4, 9, 10, 11, 13, 20, 23, 24, 25, 44, 45, 49, 51, 54]
+    assert table[11] == {"rx_power_dbm": -30.96, "tx_power_dbm": 2.11, "olt_rx_power_dbm": -29.21,
+                         "temperature_c": 44.0, "voltage_v": 3.28, "bias_ma": 13.0}
+    assert table[4]["rx_power_dbm"] == one["rx_power_dbm"]
+
+
+def test_real_ont_config():
+    assert huawei.parse_ont_config(OPT_CONFIG) == {"line_profile_id": 10, "service_profile_id": 10, "vlan": 100,
+                                                   "gemport": 1, "service_port_index": 19}
+
+
+class OpticalShell(FakeShell):
+    """Port table for port 0, unsupported on port 1 (forces the per-ONT fallback)."""
+    def send(self, data):
+        self.sent.append(data)
+        cmd = data.strip()
+        if cmd == "display ont optical-info 0 all":
+            self.queue.append(cmd + "\n" + OPT_TABLE + "\nMA5608T(config-if-gpon-0/1)#")
+        elif cmd == "display ont optical-info 1 all":
+            self.queue.append(cmd + "\n  % Parameter error, the error locates at '^'\nMA5608T(config-if-gpon-0/1)#")
+        elif cmd.startswith("display ont optical-info 1 "):
+            self.queue.append(cmd + "\n" + OPT_SINGLE + "\nMA5608T(config-if-gpon-0/1)#")
+        else:
+            self.queue.append(cmd + "\nMA5608T(config)#")
+
+
+def test_optical_many_uses_port_table_and_falls_back():
+    olt = huawei.HuaweiOLT.__new__(huawei.HuaweiOLT)
+    olt.shell, olt.timeout = OpticalShell({}), 2
+    olt._read_until_prompt()
+    onts = [{"frame": 0, "slot": 1, "port": 0, "ont_id": i} for i in (3, 4, 11)] + [{"frame": 0, "slot": 1, "port": 1, "ont_id": 7}]
+    out = olt.optical_many(onts)
+    assert out[(0, 1, 0, 11)]["rx_power_dbm"] == -30.96 and out[(0, 1, 1, 7)]["rx_power_dbm"] == -19.95
+    cmds = [c.strip() for c in olt.shell.sent if c.strip()]
+    assert cmds.count("display ont optical-info 0 all") == 1 and not any(c.startswith("display ont optical-info 0 ") and not c.endswith("all") for c in cmds)

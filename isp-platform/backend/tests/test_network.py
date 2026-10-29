@@ -107,7 +107,8 @@ def test_huawei_parsers():
     assert [(a["port"], a["serial"], a["equipment_id"]) for a in af] == [(3, "48575443A1B2C3D4", "HG8546M"), (7, "485754431122AABB", "EG8145V5")]
     t = huawei.parse_ont_info_table(ONT_TABLE)
     assert [(o["slot"], o["ont_id"], o["run_state"]) for o in t] == [(1, 0, "online"), (1, 1, "offline")]
-    assert huawei.parse_optical(OPTICAL) == {"rx_power_dbm": -19.62, "tx_power_dbm": 2.31, "olt_rx_power_dbm": -21.4, "temperature_c": 48.0}
+    assert huawei.parse_optical(OPTICAL) == {"rx_power_dbm": -19.62, "tx_power_dbm": 2.31, "olt_rx_power_dbm": -21.4, "temperature_c": 48.0,
+                                             "voltage_v": None, "bias_ma": None}
 
 
 def test_huawei_provision_builder_and_validation():

@@ -121,19 +121,28 @@ class HuaweiOLT:
         return parse_ont_info_table(self.query(f"display ont info {int(frame)} all"))
 
     def optical_many(self, onts: list[dict]) -> dict:
-        """Optical levels for several ONTs, entering each board's interface once. {(f,s,p,id): {...}}"""
+        """Optical levels for several ONTs: one `display ont optical-info <port> all` per port (V800R017 and later),
+        falling back to one ONT at a time where a board does not support the table. {(f,s,p,id): {...}}"""
         out = {}
-        by_board = {}
+        by_port = {}
         for o in onts:
-            by_board.setdefault((o["frame"], o["slot"]), []).append(o)
-        for (frame, slot), items in by_board.items():
+            by_port.setdefault((o["frame"], o["slot"]), {}).setdefault(o["port"], []).append(o)
+        for (frame, slot), ports in by_port.items():
             self.cmd(f"interface gpon {frame}/{slot}")
             try:
-                for o in items:
+                for port, items in ports.items():
                     try:
-                        out[(frame, slot, o["port"], o["ont_id"])] = parse_optical(self.cmd(f"display ont optical-info {o['port']} {o['ont_id']}"))
+                        table = parse_optical_table(self.query(f"display ont optical-info {port} all"))
                     except OLTError:
-                        continue  # went offline between the list and this read
+                        table = {}
+                    for o in items:
+                        if o["ont_id"] in table:
+                            out[(frame, slot, port, o["ont_id"])] = table[o["ont_id"]]
+                            continue
+                        try:
+                            out[(frame, slot, port, o["ont_id"])] = parse_optical(self.cmd(f"display ont optical-info {port} {o['ont_id']}"))
+                        except OLTError:
+                            continue  # went offline between the list and this read
             finally:
                 self.cmd("quit")
         return out
@@ -220,7 +229,29 @@ def parse_optical(text: str) -> dict:
         "tx_power_dbm": _dbm(text, r"Tx optical power\(dBm\)"),
         "olt_rx_power_dbm": _dbm(text, r"OLT Rx ONT optical power\(dBm\)"),
         "temperature_c": _dbm(text, r"Temperature\(C\)"),
+        "voltage_v": _dbm(text, r"Voltage\(V\)"),
+        "bias_ma": _dbm(text, r"Laser bias current\(mA\)"),
     }
+
+
+OPTICAL_ROW = re.compile(r"^\s*(\d+)\s+(-?[\d.]+|-)\s+(-?[\d.]+|-)\s+(-?[\d.]+|-)\s+(-?[\d.]+|-)\s+([\d.]+|-)\s+([\d.]+|-)\s*$", re.M)
+
+
+def parse_optical_table(text: str) -> dict:
+    """`display ont optical-info <port> all`: {ont_id: {rx, tx, olt_rx, temperature, voltage, bias}}."""
+    num = lambda v: None if v == "-" else float(v)  # noqa: E731
+    return {int(m[1]): {"rx_power_dbm": num(m[2]), "tx_power_dbm": num(m[3]), "olt_rx_power_dbm": num(m[4]),
+                        "temperature_c": num(m[5]), "voltage_v": num(m[6]), "bias_ma": num(m[7])}
+            for m in OPTICAL_ROW.finditer(text)}
+
+
+def parse_ont_config(text: str) -> dict:
+    """Profiles, VLAN and GEM port from `display current-configuration ont F/S/P ID` (lines may wrap)."""
+    flat = re.sub(r"\s+", " ", text)
+    g = lambda pat: (lambda m: int(m.group(1)) if m else None)(re.search(pat, flat))  # noqa: E731
+    return {"line_profile_id": g(r"ont-lineprofile-id (\d+)"), "service_profile_id": g(r"ont-srvprofile-id (\d+)"),
+            "vlan": g(r"service-port \d+ vlan (\d+)"), "gemport": g(r"gemport (\d+)"),
+            "service_port_index": g(r"service-port (\d+) vlan")}
 
 
 # ---------- command builders (become reviewed change plans, never run directly)

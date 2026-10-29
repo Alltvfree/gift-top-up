@@ -1,0 +1,69 @@
+MA5608T(config-if-gpon-0/1)#display ont optical-info 0 4
+  -----------------------------------------------------------------------------
+  ONU NNI port ID                        : 0
+  Module type                            : GPON
+  Module sub-type                        : CLASS B+
+  Used type                              : ONU
+  Encapsulation Type                     : BOSA ON BOARD
+  Optical power precision(dBm)           : 3.0
+  Vendor name                            : HUAWEI          
+  Vendor rev                             : -
+  Vendor PN                              : HW-BOB-0007     
+  Vendor SN                              : 1742Y7085650M   
+  Date Code                              : 17-12-19
+  Rx optical power(dBm)                  : -19.95
+  Rx power current warning threshold(dBm): [-,-]
+  Rx power current alarm threshold(dBm)  : [-29.0,-7.0]
+  Tx optical power(dBm)                  : 2.06
+  Tx power current warning threshold(dBm): [-,-]
+  Tx power current alarm threshold(dBm)  : [0.0,5.0]
+  Laser bias current(mA)                 : 8
+  Tx bias current warning threshold(mA)  : [-,-]
+  Tx bias current alarm threshold(mA)    : [2.000,100.000]
+  Temperature(C)                         : 55
+  Temperature warning threshold(C)       : [-,-]
+  Temperature alarm threshold(C)         : [-61,95]
+  Voltage(V)                             : 3.280
+  Supply voltage warning threshold(V)    : [-,-]
+  Supply voltage alarm threshold(V)      : [3.000,3.600]
+  OLT Rx ONT optical power(dBm)          : -22.30
+  CATV Rx optical power(dBm)             : -
+  CATV Rx power alarm threshold(dBm)     : [-,-]
+  -----------------------------------------------------------------------------
+===TABLE===
+MA5608T(config-if-gpon-0/1)# display ont optical-info 0 all
+  -----------------------------------------------------------------------------
+  ONT  Rx power    Tx power    OLT Rx ONT  Temperature  Voltage     Current
+  ID   (dBm)       (dBm)       power(dBm)  (C)          (V)         (mA) 
+  -----------------------------------------------------------------------------
+    3  -20.50      2.27        -23.38      56           3.280       17        
+    4  -19.95      1.86        -22.22      55           3.280       8         
+    9  -17.52      2.17        -19.71      52           3.320       8         
+   10  -22.67      2.18        -23.98      50           3.280       7         
+   11  -30.96      2.11        -29.21      44           3.280       13        
+   13  -20.97      2.31        -23.98      56           3.300       0         
+   20  -27.96      2.00        -23.10      44           3.360       11        
+   23  -22.59      2.24        -25.09      40           3.380       13        
+   24  -18.21      2.26        -21.25      48           3.360       6         
+   25  -20.22      2.29        -21.20      47           3.360       8         
+   44  -25.68      2.19        -22.68      52           3.340       11        
+   45  -16.14      2.31        -19.75      46           3.380       15        
+   49  -18.01      2.26        -21.74      48           3.360       14        
+   51  -21.67      2.27        -22.22      45           3.400       11        
+   54  -22.29      2.34        -24.44      46           3.400       16        
+  -----------------------------------------------------------------------------
+===CONFIG===
+MA5608T(config)#display current-configuration ont 0/1/0 4
+[MA5600V800R017: 5800]
+#
+[gpon]
+  <gpon-0/1>
+ interface gpon 0/1
+ ont add 0 4 sn-auth "485754435EF8859B" omci ont-lineprofile-id 10 
+ont-srvprofile-id 10 desc "HOUSE-005" 
+#
+[bbs-config]
+  <bbs-config>
+ service-port 19 vlan 100 gpon 0/1/0 ont 4 gemport 1 multi-service user-vlan 100 tag-transform translate
+#
+return

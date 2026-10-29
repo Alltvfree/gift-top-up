@@ -129,8 +129,12 @@ def ont_config(ont_uuid: UUID, user=Depends(require("network"))):
             text = olt.ont_config(o["frame"], o["slot"], o["port"], o["ont_id"])
     except Exception as exc:
         raise HTTPException(502, f"OLT: {exc}") from exc
+    parsed = huawei.parse_ont_config(text)
+    if parsed["line_profile_id"] is not None:
+        db.run("UPDATE onts SET line_profile_id=%s, service_profile_id=%s, vlan=COALESCE(%s, vlan) WHERE id=%s",
+               (parsed["line_profile_id"], parsed["service_profile_id"], parsed["vlan"], ont_uuid))
     audit.record(user["username"], "ont.read_config", "ont", ont_uuid)
-    return {"text": text}
+    return {"text": text, "parsed": parsed}
 
 
 class OntState(BaseModel):
