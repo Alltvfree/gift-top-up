@@ -73,5 +73,6 @@ server {
         proxy_read_timeout 180s;   # OLT autofind / change apply can be slow
     }
     location = /health { proxy_pass $api_upstream; }
-    location / { try_files $uri /index.html; }
+    # Browsers re-check the UI files on every load (cheap 304s), so an update shows up at once.
+    location / { expires -1; try_files $uri /index.html; }
 }
