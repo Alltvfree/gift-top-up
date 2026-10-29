@@ -262,7 +262,7 @@ const PAGES = {
         <div class="card"><div class="label">Latency / loss</div><div class="value v-lg">${esc(m.latency_ms)} ms</div><div class="note">${esc(m.packet_loss_pct)}% loss</div></div>
         <div class="card"><div class="label">CPU / memory</div><div class="value v-lg">${esc(m.cpu_load_pct)}%</div><div class="note">${esc(m.mem_used_pct)}% memory</div></div>
         <div class="card"><div class="label">Identity</div><div class="value v-sm">${esc(d.vendor)} · ${esc(d.role)}</div><div class="note">${esc(d.management_ip)}${(d.settings || {}).via_router ? esc(` via ${d.parent_name || 'router'} ${d.settings.forward_host}:${d.settings.forward_port}`) : ''} · ${esc(d.model)} ${esc(d.software_version)} · creds ${d.has_credentials ? 'stored' : 'missing'}</div></div>
-      </div>${d.last_poll_error ? `<div class="error">Last poll: ${esc(d.last_poll_error)}</div>` : ''}${m.extra ? `<pre>${esc(JSON.stringify(m.extra, null, 1))}</pre>` : ''}`, acts) +
+      </div>${d.last_poll_error ? `<div class="error">Last poll: ${esc(d.last_poll_error)}</div>` : ''}${pinOffer(d)}${m.extra ? `<pre>${esc(JSON.stringify(m.extra, null, 1))}</pre>` : ''}`, acts) +
       panel('Recent polls', table(d.metrics.slice(0, 30), [['at', 'When', dt], ['reachable', 'Up', v => v ? '<span class="s-ok">yes</span>' : '<span class="s-critical">no</span>'],
         ['latency_ms', 'Latency ms'], ['packet_loss_pct', 'Loss %'], ['cpu_load_pct', 'CPU %'], ['mem_used_pct', 'Mem %'], ['extra', 'PPPoE', v => esc(v && v.pppoe_active)]], {empty: 'Not polled yet'})) +
       panel('Alerts', table(d.alerts, [['severity', 'Sev', tag], ['kind', 'Kind'], ['message', 'Message'], ['opened_at', 'Opened', dt], ['resolved_at', 'Resolved', dt]], {empty: 'No alerts'})) +
@@ -458,6 +458,17 @@ const PAGES = {
   }},
 };
 
+// SSH host key seen by the last poll but not (or no longer) pinned: offer to trust exactly that key.
+function pinOffer(d) {
+  const m = /(No pinned host key|HOST KEY CHANGED).*?(SHA256:[A-Za-z0-9+/]{43})/.exec(d.last_poll_error || '');
+  if (!m || !can('network')) return '';
+  const changed = m[1] === 'HOST KEY CHANGED';
+  return `<p class="${changed ? 's-critical' : 'muted'}">${changed
+    ? 'The OLT presented a DIFFERENT key than the pinned one. Only replace it if you know the OLT was replaced or reset.'
+    : 'First connection to this OLT. Pin its key so SatLink only ever talks to this exact OLT.'}</p>
+    <p>${btn(changed ? 'Replace pinned key' : 'Pin this key', 'pin-key', {id: d.id, fp: m[2], changed: changed ? '1' : ''}, changed ? 'danger' : 'primary')}</p>`;
+}
+
 // ---------------------------------------------------------------- Telegram
 function telegramPanel(t) {
   if (!t.enabled) return panel('Telegram', `<p class="muted">Not set up on this server. An admin creates a bot with @BotFather and puts its token in
@@ -539,6 +550,11 @@ const ACTIONS = {
       <p class="muted">On a computer? Scan this with your phone. Then press <b>Start</b> in Telegram. The link works once, for ${esc(r.minutes)} minutes.</p>
       <img class="qr" alt="QR code linking to the Telegram bot" src="${qr.createDataURL(5, 4)}">
       <p>${btn('I pressed Start', 'tg-check')}</p>`;
+  },
+  async 'pin-key'(d) {
+    if (d.changed && !confirmAct(`Replace the pinned SSH key with ${d.fp}?`)) return;
+    await api(`/api/devices/${d.id}/pin-host-key`, 'POST', {fingerprint: d.fp});
+    toast('Key pinned. Polling…'); await api(`/api/devices/${d.id}/poll`, 'POST'); reload();
   },
   async 'olt-access'(d) {
     if (d.via && !confirmAct(`Reach this OLT through ${d.router}?\n\nSatLink adds a port forward on ${d.router} (router IP : 221xx -> OLT : 22) and a masquerade rule, both only for SatLink's own address, then connects through them.`)) return;

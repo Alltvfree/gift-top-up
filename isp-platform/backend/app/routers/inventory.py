@@ -7,7 +7,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
 from .. import audit, db
-from ..deps import require
+from ..deps import ROLES, require
 from ..security import decrypt_json, encrypt_json
 from ..services import devices as dev
 from ..services import firewall, monitor
@@ -158,6 +158,27 @@ def delete_device(device_id: UUID, user=Depends(require("approve"))):
     with db.connect() as conn:
         conn.execute("DELETE FROM devices WHERE id=%s", (device_id,))
         audit.record(user["username"], "device.delete", "device", device_id, conn=conn)
+    return {"ok": True}
+
+
+class PinKey(BaseModel):
+    fingerprint: str = Field(pattern=r"^SHA256:[A-Za-z0-9+/]{43}$")
+
+
+@router.post("/devices/{device_id}/pin-host-key")
+def pin_host_key(device_id: UUID, body: PinKey, user=Depends(require("network"))):
+    """Trust the SSH host key the last poll actually saw (shown in its error), never an arbitrary one."""
+    with db.connect() as conn:
+        d = conn.execute("SELECT name, ssh_host_key, last_poll_error FROM devices WHERE id=%s FOR UPDATE", (device_id,)).fetchone()
+        if not d:
+            raise HTTPException(404, "Device not found")
+        if body.fingerprint not in (d["last_poll_error"] or ""):
+            raise HTTPException(409, "That key is not the one the last poll saw. Poll again first.")
+        if d["ssh_host_key"] and "approve" not in ROLES[user["role"]]:
+            raise HTTPException(403, "The pinned key CHANGED: only an admin may replace it (check the OLT was not swapped or spoofed)")
+        conn.execute("UPDATE devices SET ssh_host_key=%s WHERE id=%s", (body.fingerprint, device_id))
+        audit.record(user["username"], "device.pin_host_key", "device", device_id,
+                     {"name": d["name"], "new": body.fingerprint, "old": d["ssh_host_key"]}, conn=conn)
     return {"ok": True}
 
 

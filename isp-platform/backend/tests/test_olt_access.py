@@ -87,3 +87,18 @@ def test_tcp_ping():
     srv.close()
     down = tcp_ping("127.0.0.1", port, count=1, timeout_s=0.5)
     assert not down["reachable"] and down["packet_loss_pct"] == 100
+
+
+def test_pin_host_key(admin, sql):
+    from .conftest import login
+    nina = login("nina")
+    did = admin.post("/api/devices", json={"name": "PIN-OLT", "vendor": "huawei", "role": "olt", "management_ip": "10.11.5.2"}).json()["id"]
+    fp = "SHA256:" + "A" * 43
+    assert admin.post(f"/api/devices/{did}/pin-host-key", json={"fingerprint": fp}).status_code == 409  # not seen yet
+    sql("UPDATE devices SET last_poll_error=%s WHERE id=%s", (f"HostKeyMismatch: No pinned host key for [x]:22. Verify on the console, then pin: {fp}", did))
+    assert nina.post(f"/api/devices/{did}/pin-host-key", json={"fingerprint": fp}).status_code == 200
+    assert admin.get(f"/api/devices/{did}").json()["ssh_host_key"] == fp
+    fp2 = "SHA256:" + "B" * 43
+    sql("UPDATE devices SET last_poll_error=%s WHERE id=%s", (f"HostKeyMismatch: HOST KEY CHANGED for x: got {fp2}, pinned {fp}", did))
+    assert nina.post(f"/api/devices/{did}/pin-host-key", json={"fingerprint": fp2}).status_code == 403  # only admins replace
+    assert admin.post(f"/api/devices/{did}/pin-host-key", json={"fingerprint": fp2}).status_code == 200
