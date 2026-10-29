@@ -91,7 +91,8 @@ class DeviceIn(BaseModel):
 
 DEVICE_COLS = """d.id,d.name,d.vendor,d.role,host(d.management_ip) AS management_ip,d.mgmt_port,d.model,d.software_version,
  d.status,d.last_seen_at,d.last_poll_error,d.poll_enabled,d.ssh_host_key,d.settings,d.notes,d.island_id,d.parent_device_id,
- i.name AS island_name,(d.credentials_enc IS NOT NULL) AS has_credentials"""
+ i.name AS island_name,(d.credentials_enc IS NOT NULL) AS has_credentials,
+ (SELECT p.name FROM devices p WHERE p.id=d.parent_device_id) AS parent_name"""
 
 
 @router.get("/devices")

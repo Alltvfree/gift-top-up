@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from .. import audit, config, db
 from ..adapters import huawei
 from ..deps import require
-from ..services import devices as dev
+from ..services import devices as dev, olt_access
 from .changes import create_change
 
 router = APIRouter(prefix="/api/olt", tags=["olt"])
@@ -240,3 +240,21 @@ def reboot(ont_uuid: UUID, user=Depends(require("network"))):
     audit.record(user["username"], "ont.reboot", "ont", ont_uuid,
                  {"olt": d["name"], "position": f"{o['frame']}/{o['slot']}/{o['port']}:{o['ont_id']}", "serial": o["serial"]})
     return {"ok": True, "output": out.strip()[-500:]}
+
+
+class AccessIn(BaseModel):
+    via_router: bool
+
+
+@router.post("/{olt_id}/access")
+def set_access(olt_id: UUID, body: AccessIn, user=Depends(require("network"))):
+    """Reach the OLT directly, or through a port forward on its Upstream (island) MikroTik."""
+    with db.connect() as conn:
+        try:
+            if body.via_router:
+                return olt_access.enable(conn, olt_id, user["username"])
+            return olt_access.disable(conn, olt_id, user["username"])
+        except olt_access.AccessError as exc:
+            raise HTTPException(400, str(exc)) from None
+        except Exception as exc:  # router unreachable, permissions, ...
+            raise HTTPException(502, f"{type(exc).__name__}: {exc}"[:300]) from None

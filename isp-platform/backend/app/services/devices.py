@@ -27,7 +27,8 @@ def mikrotik(device: dict):
 
 @contextmanager
 def olt(device: dict):
+    from .olt_access import endpoint  # OLTs behind an island router are reached through its forward port
     c = creds(device)
-    with HuaweiOLT(str(device["management_ip"]), c["username"], c["password"], device.get("mgmt_port") or 22,
-                   host_key=device.get("ssh_host_key")) as h:
+    host, port = endpoint(device)
+    with HuaweiOLT(host, c["username"], c["password"], port, host_key=device.get("ssh_host_key")) as h:
         yield h

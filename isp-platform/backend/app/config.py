@@ -70,6 +70,10 @@ ONT_RX_GOOD = float(os.environ.get("ONT_RX_GOOD", "-25"))
 ONT_RX_ACCEPTABLE = float(os.environ.get("ONT_RX_ACCEPTABLE", "-27"))
 ONT_RX_WEAK = float(os.environ.get("ONT_RX_WEAK", "-29"))
 
+# This platform's address as island routers see it (used for OLT access via router when the router's
+# API user has no address restriction to read it from).
+NMS_SOURCE_IP = os.environ.get("NMS_SOURCE_IP", "").strip()
+
 # Telegram bot (from @BotFather): change approvals and alerts. Empty = Telegram off.
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 # Optional link to the portal in Telegram messages, e.g. https://172.17.205.188:8443

@@ -8,10 +8,10 @@ from psycopg.types.json import Jsonb
 
 from .. import config, db
 from ..adapters import airfiber
-from ..adapters.ping import ping
+from ..adapters.ping import ping, tcp_ping
 from ..security import decrypt_json
 from . import devices as dev
-from . import telegram, threats
+from . import olt_access, telegram, threats
 
 log = logging.getLogger(__name__)
 
@@ -29,7 +29,10 @@ def poll_device(device: dict, with_olt: bool = False) -> dict:
     m = {"reachable": False, "extra": {}}
     if not device.get("management_ip"):
         return {**m, "error": "no management IP"}
-    m.update(ping(str(device["management_ip"])))
+    if (device.get("settings") or {}).get("via_router"):
+        m.update(tcp_ping(*olt_access.endpoint(device)))  # OLT behind its island router: no ICMP path
+    else:
+        m.update(ping(str(device["management_ip"])))
     if not m["reachable"]:
         return m
     try:

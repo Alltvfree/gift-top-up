@@ -253,13 +253,15 @@ const PAGES = {
       d.vendor === 'mikrotik' ? btn('Security audit', 'device-audit', {id}, 'primary') : '',
       d.vendor === 'mikrotik' ? btn('Generate firewall', 'go', {href: `#/security?device=${id}`}) : '',
       d.vendor === 'huawei' && d.role === 'olt' ? btn('ONT autofind', 'olt-autofind', {id}, 'primary') : '',
+      d.vendor === 'huawei' && d.parent_name ? ((d.settings || {}).via_router ? btn('Connect directly', 'olt-access', {id, via: ''})
+        : btn(`Reach through ${d.parent_name}`, 'olt-access', {id, via: '1', router: d.parent_name})) : '',
       can('approve') ? btn('Delete', 'device-del', {id}, 'danger') : ''].join('') : '';
     const m = d.metrics[0] || {};
     return panel(`${d.name}`, `<div class="cards">
         <div class="card"><div class="label">Status</div><div class="value">${tag(d.status)}</div><div class="note">seen ${ago(d.last_seen_at)}</div></div>
         <div class="card"><div class="label">Latency / loss</div><div class="value v-lg">${esc(m.latency_ms)} ms</div><div class="note">${esc(m.packet_loss_pct)}% loss</div></div>
         <div class="card"><div class="label">CPU / memory</div><div class="value v-lg">${esc(m.cpu_load_pct)}%</div><div class="note">${esc(m.mem_used_pct)}% memory</div></div>
-        <div class="card"><div class="label">Identity</div><div class="value v-sm">${esc(d.vendor)} · ${esc(d.role)}</div><div class="note">${esc(d.management_ip)} · ${esc(d.model)} ${esc(d.software_version)} · creds ${d.has_credentials ? 'stored' : 'missing'}</div></div>
+        <div class="card"><div class="label">Identity</div><div class="value v-sm">${esc(d.vendor)} · ${esc(d.role)}</div><div class="note">${esc(d.management_ip)}${(d.settings || {}).via_router ? esc(` via ${d.parent_name || 'router'} ${d.settings.forward_host}:${d.settings.forward_port}`) : ''} · ${esc(d.model)} ${esc(d.software_version)} · creds ${d.has_credentials ? 'stored' : 'missing'}</div></div>
       </div>${d.last_poll_error ? `<div class="error">Last poll: ${esc(d.last_poll_error)}</div>` : ''}${m.extra ? `<pre>${esc(JSON.stringify(m.extra, null, 1))}</pre>` : ''}`, acts) +
       panel('Recent polls', table(d.metrics.slice(0, 30), [['at', 'When', dt], ['reachable', 'Up', v => v ? '<span class="s-ok">yes</span>' : '<span class="s-critical">no</span>'],
         ['latency_ms', 'Latency ms'], ['packet_loss_pct', 'Loss %'], ['cpu_load_pct', 'CPU %'], ['mem_used_pct', 'Mem %'], ['extra', 'PPPoE', v => esc(v && v.pppoe_active)]], {empty: 'Not polled yet'})) +
@@ -538,6 +540,11 @@ const ACTIONS = {
       <img class="qr" alt="QR code linking to the Telegram bot" src="${qr.createDataURL(5, 4)}">
       <p>${btn('I pressed Start', 'tg-check')}</p>`;
   },
+  async 'olt-access'(d) {
+    if (d.via && !confirmAct(`Reach this OLT through ${d.router}?\n\nSatLink adds a port forward on ${d.router} (router IP : 221xx -> OLT : 22) and a masquerade rule, both only for SatLink's own address, then connects through them.`)) return;
+    const r = await api(`/api/olt/${d.id}/access`, 'POST', {via_router: !!d.via});
+    toast(d.via ? `Reaching the OLT via ${r.router} ${r.host}:${r.port}. Press "Poll now".` : `Direct access; ${r.rules_removed} router rules removed`); reload();
+  },
   async 'tg-check'() {
     if ((await api('/api/auth/telegram')).linked) { toast('Telegram connected'); reload(); } else toast('Not connected yet. Press Start in Telegram first.', true);
   },
@@ -603,7 +610,7 @@ const ACTIONS = {
     const [dev, islands, devices] = await Promise.all([d.id ? api(`/api/devices/${d.id}`) : {poll_enabled: true, settings: {}}, options('islands'), options('devices')]);
     modal(`<h2>${d.id ? 'Edit' : 'Add'} device</h2>` + form('device', fields([
       ['name', 'Name', 'text', {required: true}], ['island_id', 'Island', 'select', {options: none('— core / none —').concat(islands)}],
-      ['parent_device_id', 'Upstream device', 'select', {options: none('—').concat(devices.filter(x => x[0] !== d.id))}],
+      ['parent_device_id', 'Upstream device (for an OLT: its PPPoE NAS / island MikroTik)', 'select', {options: none('—').concat(devices.filter(x => x[0] !== d.id))}],
       ['vendor', 'Vendor', 'select', {options: [['mikrotik', 'MikroTik'], ['huawei', 'Huawei'], ['ubiquiti', 'Ubiquiti (airFiber)'], ['other', 'Other']]}],
       ['role', 'Role', 'select', {options: [['island_router', 'Island router'], ['core_router', 'Core router'], ['olt', 'OLT'], ['backhaul', 'Backhaul radio'], ['radius', 'RADIUS'], ['other', 'Other']]}],
       ['management_ip', 'Management IP', 'text'], ['mgmt_port', 'Mgmt port (REST 443 / SSH 22)', 'number'], ['model', 'Model', 'text'],
