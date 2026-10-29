@@ -253,7 +253,7 @@ const PAGES = {
       d.vendor === 'mikrotik' ? btn('Security audit', 'device-audit', {id}, 'primary') : '',
       d.vendor === 'mikrotik' ? btn('Generate firewall', 'go', {href: `#/security?device=${id}`}) : '',
       d.vendor === 'huawei' && d.role === 'olt' ? btn('ONT autofind', 'olt-autofind', {id}, 'primary') : '',
-      d.vendor === 'huawei' && d.parent_name ? ((d.settings || {}).via_router ? btn('Connect directly', 'olt-access', {id, via: ''})
+      ['huawei', 'ubiquiti'].includes(d.vendor) && d.parent_name ? ((d.settings || {}).via_router ? btn('Connect directly', 'olt-access', {id, via: ''})
         : btn(`Reach through ${d.parent_name}`, 'olt-access', {id, via: '1', router: d.parent_name})) : '',
       can('approve') ? btn('Delete', 'device-del', {id}, 'danger') : ''].join('') : '';
     const m = d.metrics[0] || {};
@@ -557,9 +557,9 @@ const ACTIONS = {
     toast('Key pinned. Polling…'); await api(`/api/devices/${d.id}/poll`, 'POST'); reload();
   },
   async 'olt-access'(d) {
-    if (d.via && !confirmAct(`Reach this OLT through ${d.router}?\n\nSatLink adds a port forward on ${d.router} (router IP : 221xx -> OLT : 22) and a masquerade rule, both only for SatLink's own address, then connects through them.`)) return;
+    if (d.via && !confirmAct(`Reach this device through ${d.router}?\n\nSatLink adds a port forward on ${d.router} (OLT: SSH 22 via port 221xx, radio: SNMP 161 via port 161xx) and a masquerade rule, both only for SatLink's own address, then connects through them.`)) return;
     const r = await api(`/api/olt/${d.id}/access`, 'POST', {via_router: !!d.via});
-    toast(d.via ? `Reaching the OLT via ${r.router} ${r.host}:${r.port}. Press "Poll now".` : `Direct access; ${r.rules_removed} router rules removed`); reload();
+    toast(d.via ? `Reaching the device via ${r.router} ${r.host}:${r.port}. Press "Poll now".` : `Direct access; ${r.rules_removed} router rules removed`); reload();
   },
   async 'tg-check'() {
     if ((await api('/api/auth/telegram')).linked) { toast('Telegram connected'); reload(); } else toast('Not connected yet. Press Start in Telegram first.', true);

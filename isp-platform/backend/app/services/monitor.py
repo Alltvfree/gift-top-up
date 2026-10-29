@@ -1,5 +1,6 @@
 """Polling engine: ping every device, then vendor-specific health; derive status, alerts, rollups."""
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -30,6 +31,8 @@ def poll_device(device: dict, with_olt: bool = False) -> dict:
     m = {"reachable": False, "extra": {}}
     if not device.get("management_ip"):
         return {**m, "error": "no management IP"}
+    if (device.get("settings") or {}).get("via_router") and device["vendor"] == "ubiquiti":
+        return poll_radio_via_router(device, m)
     if (device.get("settings") or {}).get("via_router"):
         m.update(tcp_ping(*olt_access.endpoint(device)))  # OLT behind its island router: no ICMP path
     else:
@@ -71,6 +74,23 @@ def poll_device(device: dict, with_olt: bool = False) -> dict:
             m["extra"]["ont_online"] = sum(o["run_state"] == "online" for o in r["onts"])
     except Exception as exc:  # one broken device must never stop the sweep
         m["error"] = f"{type(exc).__name__}: {exc}"[:300]
+    return m
+
+
+def poll_radio_via_router(device: dict, m: dict) -> dict:
+    """airFiber reached through its router's SNMP forward: an SNMP answer is the reachability test."""
+    community = (decrypt_json(device.get("credentials_enc")) if device.get("credentials_enc") else {}).get("snmp_community")
+    if not community:
+        return {**m, "error": "no SNMP community stored"}
+    host, port = olt_access.endpoint(device)
+    started = time.monotonic()
+    try:
+        r = airfiber.poll(f"{host}:{port}", community)
+    except Exception as exc:
+        return {**m, "packet_loss_pct": 100.0, "error": f"{type(exc).__name__}: {exc}"[:300]}
+    m.update({"reachable": True, "packet_loss_pct": 0.0, "latency_ms": round((time.monotonic() - started) * 1000, 1),
+              "uptime_s": r["uptime_s"]})
+    m["extra"].update({**r["extra"], "via": f"snmp via {host}:{port}"})
     return m
 
 

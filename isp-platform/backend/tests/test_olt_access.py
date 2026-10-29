@@ -102,3 +102,32 @@ def test_pin_host_key(admin, sql):
     sql("UPDATE devices SET last_poll_error=%s WHERE id=%s", (f"HostKeyMismatch: HOST KEY CHANGED for x: got {fp2}, pinned {fp}", did))
     assert nina.post(f"/api/devices/{did}/pin-host-key", json={"fingerprint": fp2}).status_code == 403  # only admins replace
     assert admin.post(f"/api/devices/{did}/pin-host-key", json={"fingerprint": fp2}).status_code == 200
+
+
+def test_plan_radio_snmp():
+    port, _, script = olt_access.plan([], "af-1", "192.168.174.40", "192.168.174.50", "172.17.205.188",
+                                      *olt_access.SERVICES["ubiquiti"])
+    assert port == 16101
+    assert "protocol=udp src-address=172.17.205.188 dst-address=192.168.174.40 dst-port=16101 to-addresses=192.168.174.50 to-ports=161" in script
+    assert 'masquerade protocol=udp src-address=172.17.205.188 dst-address=192.168.174.50 dst-port=161' in script
+    assert olt_access.endpoint({"vendor": "ubiquiti", "management_ip": "192.168.174.50", "settings": {}}) == ("192.168.174.50", 161)
+
+
+def test_radio_polled_through_router(monkeypatch):
+    from app.security import encrypt_json
+    from app.services import monitor
+    seen = []
+
+    def fake_poll(host, community):
+        seen.append((host, community))
+        return {"uptime_s": 99, "extra": {"sys_descr": "AF-5XHD"}}
+    monkeypatch.setattr(monitor.airfiber, "poll", fake_poll)
+    monkeypatch.setattr(monitor, "ping", lambda host: pytest.fail("radios behind a router are not pinged"))
+    device = {"id": "x", "name": "KUL-NEL-AF-M", "vendor": "ubiquiti", "role": "backhaul", "management_ip": "192.168.174.50",
+              "credentials_enc": encrypt_json({"snmp_community": "c0mm"}),
+              "settings": {"via_router": True, "forward_host": "192.168.174.40", "forward_port": 16101}}
+    m = monitor.poll_device(device)
+    assert seen == [("192.168.174.40:16101", "c0mm")] and m["reachable"] and m["uptime_s"] == 99
+    monkeypatch.setattr(monitor.airfiber, "poll", lambda h, c: (_ for _ in ()).throw(RuntimeError("No SNMP response")))
+    m = monitor.poll_device(device)
+    assert not m["reachable"] and "No SNMP response" in m["error"]
