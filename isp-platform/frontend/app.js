@@ -8,6 +8,13 @@ let ME = null;
 const cache = {};
 
 // ---------------------------------------------------------------- API
+// Replies from nginx itself (no JSON detail from the API)
+const HTTP_TEXT = {
+  429: 'Too many requests from this device. Wait a minute and try again.',
+  502: 'The platform API is not reachable (starting or restarting). Try again shortly.',
+  503: 'The platform is temporarily unavailable. Try again shortly.',
+  504: 'The platform API took too long to answer. Try again.',
+};
 async function api(path, method = 'GET', body) {
   const r = await fetch(path, {
     method, credentials: 'same-origin',
@@ -20,7 +27,7 @@ async function api(path, method = 'GET', body) {
   if (!r.ok) {
     let d = data && data.detail;
     if (Array.isArray(d)) d = d.map(x => `${(x.loc || []).slice(-1)[0]}: ${x.msg}`).join('; ');
-    throw new Error(d || `HTTP ${r.status}`);
+    throw new Error(d || HTTP_TEXT[r.status] || `HTTP ${r.status}`);
   }
   return data;
 }
