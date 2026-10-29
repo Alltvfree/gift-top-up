@@ -1,0 +1,311 @@
+MA5608T#display ont info 0 all
+  -----------------------------------------------------------------------------
+  F/S/P   ONT         SN         Control     Run      Config   Match    Protect
+          ID                     flag        state    state    state    side 
+  -----------------------------------------------------------------------------
+  0/ 1/0    0  485754434C62729B  active      offline  initial  initial  no 
+  0/ 1/0    1  485754430C7EEA9C  active      offline  initial  initial  no 
+  0/ 1/0    2  48575443021D6B9C  active      offline  initial  initial  no 
+  0/ 1/0    3  485754435D9A119A  active      online   normal   match    no 
+  0/ 1/0    4  485754435EF8859B  active      online   normal   match    no 
+  0/ 1/0    5  4857544331F7AA9B  active      offline  initial  initial  no 
+  0/ 1/0    6  4857544323D2879D  active      offline  initial  initial  no 
+  0/ 1/0    7  48575443758A149C  active      offline  initial  initial  no 
+  0/ 1/0    9  48575443266BB09B  active      online   normal   match    no 
+  0/ 1/0   10  485754434CEFA59B  active      online   normal   match    no 
+  0/ 1/0   11  485754438AA29A87  active      online   normal   match    no 
+  0/ 1/0   12  485754438AA05187  active      offline  initial  initial  no 
+  0/ 1/0   13  4857544345F27A9B  active      online   normal   match    no 
+  0/ 1/0   16  48575443348FB4A3  active      offline  initial  initial  no 
+  0/ 1/0   18  4857544313A2E2B9  active      offline  initial  initial  no 
+  0/ 1/0   20  485754434A712BB8  active      online   normal   match    no 
+  0/ 1/0   21  485754433E60DC8D  active      offline  initial  initial  no 
+  0/ 1/0   22  4857544370560F96  active      offline  initial  initial  no 
+  0/ 1/0   23  485754434D7E76A3  active      online   normal   match    no 
+  0/ 1/0   24  48575443D6323D9C  active      online   normal   match    no 
+  0/ 1/0   25  48575443C13C4B9C  active      online   normal   match    no 
+  0/ 1/0   44  48575443E7A9DA9E  active      online   normal   match    no 
+  0/ 1/0   45  48575443DB4157A6  active      online   normal   match    no 
+  0/ 1/0   46  485754431FE98C44  active      offline  initial  initial  no 
+  0/ 1/0   49  485754439FB7C451  active      online   normal   match    no 
+  0/ 1/0   50  48575443FE6AC84B  active      offline  initial  initial  no 
+  0/ 1/0   51  48575443F5E4A30C  active      online   normal   match    no 
+  0/ 1/0   52  485754431F5A82AD  active      offline  initial  initial  no 
+  0/ 1/0   53  4857544376CA191B  active      offline  initial  initial  no 
+  0/ 1/0   54  48575443BD1A45A3  active      online   normal   match    no 
+  0/ 1/0   55  48575443CC5C8141  active      offline  initial  initial  no 
+  -----------------------------------------------------------------------------
+  F/S/P   ONT-ID   Description
+  -----------------------------------------------------------------------------
+  0/ 1/0       0   HOUSE-001
+  0/ 1/0       1   HOUSE-002
+  0/ 1/0       2   HOUSE-003
+  0/ 1/0       3   HOUSE-004
+  0/ 1/0       4   HOUSE-005
+  0/ 1/0       5   HOUSE-006
+  0/ 1/0       6   HOUSE-007
+  0/ 1/0       7   HOUSE-008
+  0/ 1/0       9   HOUSE-009
+  0/ 1/0      10   HOUSE-010    
+  0/ 1/0      11   HOUSE-011
+  0/ 1/0      12   HOUSE-012
+  0/ 1/0      13   HOUSE-013
+  0/ 1/0      16   HOUSE-014
+  0/ 1/0      18   HOUSE-015
+  0/ 1/0      20   HOUSE-016
+  0/ 1/0      21   HOUSE-017
+  0/ 1/0      22   HOUSE-018
+  0/ 1/0      23   HOUSE-019
+  0/ 1/0      24   HOUSE-020
+  0/ 1/0      25   HOUSE-021
+  0/ 1/0      44   HOUSE-022
+  0/ 1/0      45   HOUSE-023
+  0/ 1/0      46   HOUSE-024
+  0/ 1/0      49   HOUSE-025
+  0/ 1/0      50   HOUSE-026
+  0/ 1/0      51   HOUSE-027
+  0/ 1/0      52   HOUSE-028
+  0/ 1/0      53   HOUSE-029
+  0/ 1/0      54   HOUSE_030
+  0/ 1/0      55   HOUSE_031
+  -----------------------------------------------------------------------------
+  In port 0/ 1/0 , the total of ONTs are: 31, online: 15
+  -----------------------------------------------------------------------------
+  
+  -----------------------------------------------------------------------------
+  F/S/P   ONT         SN         Control     Run      Config   Match    Protect
+          ID                     flag        state    state    state    side 
+  -----------------------------------------------------------------------------
+  0/ 1/1    4  485754431FB17E9C  active      offline  initial  initial  no 
+  0/ 1/1    5  48575443D4F5189B  active      offline  initial  initial  no 
+  0/ 1/1    7  485754438B57089B  active      offline  initial  initial  no 
+  0/ 1/1    8  4857544396F2F69C  active      offline  initial  initial  no 
+  0/ 1/1    9  485754438AA20B87  active      offline  initial  initial  no 
+  0/ 1/1   10  485754438A9AA187  active      offline  initial  initial  no 
+  0/ 1/1   11  48575443373CE7A3  active      online   normal   match    no 
+  0/ 1/1   12  48575443BDF931A4  active      offline  initial  initial  no 
+  0/ 1/1   13  48575443DE9687B8  active      offline  initial  initial  no 
+  0/ 1/1   14  48575443239941A4  active      online   normal   match    no 
+  0/ 1/1   15  48575443D654FCB8  active      online   normal   match    no 
+  0/ 1/1   18  485754433491DAA3  active      online   normal   match    no 
+  0/ 1/1   50  4857544397A83C40  active      online   normal   match    no 
+  0/ 1/1   51  48575443904F8F9C  active      online   normal   match    no 
+  -----------------------------------------------------------------------------
+  F/S/P   ONT-ID   Description
+  -----------------------------------------------------------------------------
+  0/ 1/1       4   HOUSE-032
+  0/ 1/1       5   HOUSE-033         
+  0/ 1/1       7   HOUSE_034
+  0/ 1/1       8   HOUSE-035
+  0/ 1/1       9   HOUSE-036
+  0/ 1/1      10   HOUSE-037
+  0/ 1/1      11   HOUSE-038
+  0/ 1/1      12   HOUSE-039
+  0/ 1/1      13   HOUSE-040
+  0/ 1/1      14   HOUSE-041
+  0/ 1/1      15   HOUSE-042
+  0/ 1/1      18   HOUSE-043
+  0/ 1/1      50   HOUSE-044
+  0/ 1/1      51   HOUSE-045
+  -----------------------------------------------------------------------------
+  In port 0/ 1/1 , the total of ONTs are: 14, online: 6
+  -----------------------------------------------------------------------------
+  
+  -----------------------------------------------------------------------------
+  F/S/P   ONT         SN         Control     Run      Config   Match    Protect
+          ID                     flag        state    state    state    side 
+  -----------------------------------------------------------------------------
+  0/ 1/2    1  485754433CD1BC9A  active      offline  initial  initial  no 
+  0/ 1/2    3  48575443D7C0A59A  active      offline  initial  initial  no 
+  0/ 1/2    4  48575443EFC1279A  active      online   normal   match    no 
+  0/ 1/2    5  48575443EC54859A  active      online   normal   match    no 
+  0/ 1/2    6  4857544377B73E9A  active      online   normal   match    no 
+  0/ 1/2    7  4857544317961B96  active      online   normal   match    no 
+  0/ 1/2    8  4857544357BAC9A3  active      online   normal   match    no 
+  0/ 1/2    9  48575443327683B9  active      online   normal   match    no 
+  0/ 1/2   10  48575443D4F9F29B  active      offline  initial  initial  no 
+  0/ 1/2   11  4857544357A44DA3  active      online   normal   match    no 
+  0/ 1/2   12  48575443B8356CB8  active      offline  initial  initial  no 
+  0/ 1/2   15  485754438B57088F  active      online   normal   match    no 
+  -----------------------------------------------------------------------------
+  F/S/P   ONT-ID   Description
+  -----------------------------------------------------------------------------
+  0/ 1/2       1   HOUSE-046
+  0/ 1/2       3   HOUSE-047
+  0/ 1/2       4   HOUSE-048
+  0/ 1/2       5   HOUSE-049
+  0/ 1/2       6   HOUSE-050
+  0/ 1/2       7   HOUSE-051
+  0/ 1/2       8   HOUSE-052
+  0/ 1/2       9   HOUSE-053 5G
+  0/ 1/2      10   HOUSE-054
+  0/ 1/2      11   HOUSE-055
+  0/ 1/2      12   HOUSE-056
+  0/ 1/2      15   HOUSE-057
+  -----------------------------------------------------------------------------
+  In port 0/ 1/2 , the total of ONTs are: 12, online: 8
+  -----------------------------------------------------------------------------
+  
+  -----------------------------------------------------------------------------
+  F/S/P   ONT         SN         Control     Run      Config   Match    Protect
+          ID                     flag        state    state    state    side 
+  -----------------------------------------------------------------------------
+  0/ 1/3    0  485754437B324A9A  active      online   normal   match    no 
+  0/ 1/3    1  485754434A7DEF9A  active      offline  initial  initial  no 
+  0/ 1/3    3  48575443B2C0FE96  active      offline  initial  initial  no 
+  0/ 1/3    4  485754436DE3FB9B  active      offline  initial  initial  no 
+  0/ 1/3    5  4857544351A9109B  active      offline  initial  initial  no 
+  0/ 1/3    6  4857544324C9B69C  active      offline  initial  initial  no 
+  0/ 1/3    7  485754438A3A529C  active      offline  initial  initial  no 
+  0/ 1/3    8  48575443F95C7D9B  active      offline  initial  initial  no 
+  0/ 1/3    9  48575443D3B2169B  active      online   normal   match    no 
+  0/ 1/3   10  485754436244819C  active      offline  initial  initial  no 
+  0/ 1/3   11  485754438ADCFB9B  active      offline  initial  initial  no 
+  0/ 1/3   12  48575443579F18A3  active      offline  initial  initial  no 
+  0/ 1/3   14  4857544357A237A3  active      offline  initial  initial  no 
+  0/ 1/3   16  48575443DE66C9A2  active      online   normal   match    no 
+  0/ 1/3   17  485754432EFA69A3  active      online   normal   match    no 
+  0/ 1/3   19  48575443348B75A3  active      offline  initial  initial  no 
+  0/ 1/3   20  485754432CAC45B9  active      online   normal   match    no 
+  0/ 1/3   21  48575443B83278B8  active      online   normal   match    no 
+  0/ 1/3   22  48575443178517B8  active      offline  initial  initial  no 
+  0/ 1/3   24  48575443C1A3AE9C  active      online   normal   match    no 
+  0/ 1/3   50  48575443CDF47926  active      online   normal   match    no 
+  0/ 1/3   70  485754434B3196E2  active      online   normal   match    no 
+  -----------------------------------------------------------------------------
+  F/S/P   ONT-ID   Description
+  -----------------------------------------------------------------------------
+  0/ 1/3       0   HOUSE-058
+  0/ 1/3       1   HOUSE-059
+  0/ 1/3       3   HOUSE-060
+  0/ 1/3       4   HOUSE-061
+  0/ 1/3       5   HOUSE-062
+  0/ 1/3       6   HOUSE-063
+  0/ 1/3       7   HOUSE-064
+  0/ 1/3       8   HOUSE-065
+  0/ 1/3       9   HOUSE-066
+  0/ 1/3      10   HOUSE-067
+  0/ 1/3      11   HOUSE-068
+  0/ 1/3      12   HOUSE-069
+  0/ 1/3      14   HOUSE-070
+  0/ 1/3      16   HOUSE-071
+  0/ 1/3      17   HOUSE-072
+  0/ 1/3      19   HOUSE-073              
+  0/ 1/3      20   HOUSE-074
+  0/ 1/3      21   HOUSE-075
+  0/ 1/3      22   HOUSE-076
+  0/ 1/3      24   HOUSE-077
+  0/ 1/3      50   HOUSE-078
+  0/ 1/3      70   HOUSE-079
+  -----------------------------------------------------------------------------
+  In port 0/ 1/3 , the total of ONTs are: 22, online: 9
+  -----------------------------------------------------------------------------
+  
+  -----------------------------------------------------------------------------
+  F/S/P   ONT         SN         Control     Run      Config   Match    Protect
+          ID                     flag        state    state    state    side 
+  -----------------------------------------------------------------------------
+  0/ 1/4    0  485754435AB5649B  active      offline  initial  initial  no 
+  0/ 1/4    1  48575443BE0254A4  active      offline  initial  initial  no 
+  0/ 1/4    2  48575443452CA692  active      offline  initial  initial  no 
+  0/ 1/4    3  4857544376CA199A  active      online   normal   match    no 
+  0/ 1/4    4  48575443AA2B829A  active      offline  initial  initial  no 
+  0/ 1/4    5  485754436225579C  active      offline  initial  initial  no 
+  0/ 1/4    6  48575443BA3C809B  active      offline  initial  initial  no 
+  0/ 1/4    7  485754431BA00A9A  active      online   normal   match    no 
+  0/ 1/4    8  485754437037679B  active      offline  initial  initial  no 
+  0/ 1/4    9  48575443ECF7DB9A  active      offline  initial  initial  no 
+  0/ 1/4   10  48575443CB8FEF9B  active      online   normal   match    no 
+  0/ 1/4   11  485754439D1AF89B  active      offline  initial  initial  no 
+  0/ 1/4   12  485754434BC10E9C  active      offline  initial  initial  no 
+  0/ 1/4   13  48575443CBB2CC9B  active      offline  initial  initial  no 
+  0/ 1/4   15  485754438A9F5A87  active      offline  initial  initial  no 
+  0/ 1/4   16  485754436A4B2793  active      offline  initial  initial  no 
+  0/ 1/4   17  48575443D4FBB09B  active      offline  initial  initial  no 
+  0/ 1/4   19  48575443F2AF6A9C  active      offline  initial  initial  no 
+  0/ 1/4   21  4857544327FBBFB8  active      offline  initial  initial  no 
+  0/ 1/4   22  4857544357BACAA3  active      offline  initial  initial  no 
+  0/ 1/4   23  4857544340680D96  active      offline  initial  initial  no 
+  0/ 1/4   24  48575443DE62CBA2  active      online   normal   match    no 
+  0/ 1/4   25  48575443C33754A5  active      online   normal   match    no 
+  0/ 1/4   26  4857544316D5234A  active      online   normal   match    no 
+  0/ 1/4   60  4857544302C1E7A8  active      online   normal   match    no 
+  0/ 1/4   61  48575443F676FF9A  active      offline  initial  initial  no 
+  0/ 1/4   68  4857544302C308A8  active      online   normal   match    no 
+  0/ 1/4  100  485754436EF52196  active      offline  initial  initial  no 
+  -----------------------------------------------------------------------------
+  F/S/P   ONT-ID   Description
+  -----------------------------------------------------------------------------
+  0/ 1/4       0   HOUSE-080
+  0/ 1/4       1   HOUSE-081
+  0/ 1/4       2   HOUSE-082        
+  0/ 1/4       3   HOUSE_083
+  0/ 1/4       4   HOUSE-084
+  0/ 1/4       5   HOUSE-085
+  0/ 1/4       6   HOUSE-086
+  0/ 1/4       7   HOUSE-087
+  0/ 1/4       8   HOUSE-088
+  0/ 1/4       9   HOUSE-089
+  0/ 1/4      10   HOUSE-090
+  0/ 1/4      11   HOUSE-091
+  0/ 1/4      12   HOUSE-092
+  0/ 1/4      13   HOUSE-093
+  0/ 1/4      15   HOUSE-094
+  0/ 1/4      16   HOUSE-095
+  0/ 1/4      17   HOUSE-096
+  0/ 1/4      19   HOUSE-097
+  0/ 1/4      21   HOUSE-098
+  0/ 1/4      22   HOUSE-099
+  0/ 1/4      23   HOUSE-100
+  0/ 1/4      24   HOUSE-101
+  0/ 1/4      25   HOUSE-102
+  0/ 1/4      26   HOUSE-103
+  0/ 1/4      60   house-104
+  0/ 1/4      61   HOUSE-105
+  0/ 1/4      68   HOUSE_106          
+  0/ 1/4     100   HOUSE-107
+  -----------------------------------------------------------------------------
+  In port 0/ 1/4 , the total of ONTs are: 28, online: 8
+  -----------------------------------------------------------------------------
+  
+  -----------------------------------------------------------------------------
+  F/S/P   ONT         SN         Control     Run      Config   Match    Protect
+          ID                     flag        state    state    state    side 
+  -----------------------------------------------------------------------------
+  0/ 1/5    0  48575443AAA87CB8  active      online   normal   match    no 
+  0/ 1/5    1  485754437CC9109C  active      online   normal   match    no 
+  -----------------------------------------------------------------------------
+  F/S/P   ONT-ID   Description
+  -----------------------------------------------------------------------------
+  0/ 1/5       0   HOUSE-108
+  0/ 1/5       1   HOUSE_109
+  -----------------------------------------------------------------------------
+  In port 0/ 1/5 , the total of ONTs are: 2, online: 2
+  -----------------------------------------------------------------------------
+  
+  -----------------------------------------------------------------------------
+  F/S/P   ONT         SN         Control     Run      Config   Match    Protect
+          ID                     flag        state    state    state    side 
+  -----------------------------------------------------------------------------
+  0/ 1/6    0  485754434DC8E29C  active      online   normal   match    no 
+  -----------------------------------------------------------------------------
+  F/S/P   ONT-ID   Description
+  -----------------------------------------------------------------------------
+  0/ 1/6       0   HOUSE-110
+  -----------------------------------------------------------------------------
+  In port 0/ 1/6 , the total of ONTs are: 1, online: 1
+  -----------------------------------------------------------------------------
+  
+  -----------------------------------------------------------------------------
+  F/S/P   ONT         SN         Control     Run      Config   Match    Protect
+          ID                     flag        state    state    state    side 
+  -----------------------------------------------------------------------------
+  0/ 1/7    1  485754430D72E45C  active      online   normal   match    no 
+  -----------------------------------------------------------------------------
+  F/S/P   ONT-ID   Description
+  -----------------------------------------------------------------------------
+  0/ 1/7       1   HOUSE-111
+  -----------------------------------------------------------------------------
+  In port 0/ 1/7 , the total of ONTs are: 1, online: 1
+  -----------------------------------------------------------------------------
+

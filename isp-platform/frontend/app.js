@@ -268,15 +268,56 @@ const PAGES = {
   }},
 
   olt: {title: 'Smart OLT', group: 'INFRASTRUCTURE', nav: '⌁ Smart OLT', perm: 'read', async render() {
-    const [onts, devices] = await Promise.all([api('/api/olt/onts'), api('/api/devices')]);
-    const olts = devices.filter(d => d.vendor === 'huawei' && d.role === 'olt');
-    const autofind = can('network') ? olts.map(o => btn(`Autofind · ${o.name}`, 'olt-autofind', {id: o.id})).join('') : '';
-    const low = onts.filter(o => o.rx_power_dbm != null && o.rx_power_dbm < -27).length;
-    return panel(`ONTs (${onts.length}) · ${low} with weak signal`, table(onts, [['olt_name', 'OLT'], ['frame', 'F/S/P:ID', (v, r) => esc(`${r.frame}/${r.slot}/${r.port}:${r.ont_id ?? '?'}`)],
-      ['serial', 'Serial'], ['account_number', 'Account', (v, r) => r.subscriber_id ? `<a href="#/subscriber/${val(r.subscriber_id)}">${esc(v)}</a> ${esc(r.full_name)}` : '<span class="muted">unlinked</span>'],
-      ['run_state', 'State', tag], ['rx_power_dbm', 'ONT Rx', dbm], ['olt_rx_power_dbm', 'OLT Rx', dbm], ['last_seen_at', 'Seen', ago],
-      ['id', '', id => can('network') ? btn('Reboot', 'ont-reboot', {id}) : '']], {empty: 'No ONTs yet. Add your Huawei OLT under Devices with settings {"gpon_slots":[1]}.'}),
-      autofind, 'optical levels refresh every few polling cycles; below −27 dBm raises an alert');
+    const rows = await api('/api/olt/overview');
+    return panel(`OLTs (${rows.length})`, table(rows, [['name', 'OLT'], ['island_name', 'Island'], ['host', 'Host'], ['nas_name', 'PPPoE NAS'], ['status', 'Status', tag],
+      ['total', 'ONTs'], ['online', 'Online', (v, r) => `<span class="s-ok">${esc(v)}</span> / ${esc(r.total - v)} off`],
+      ['weak_bad', 'Weak/bad', v => v ? `<span class="s-warning">${esc(v)}</span>` : '0'],
+      ['waiting', 'Waiting auth', v => v ? `<span class="s-critical">${esc(v)}</span>` : '0'], ['polled_at', 'Polled', ago]],
+      {href: r => `#/oltview/${r.id}`, empty: 'Add your Huawei OLTs under Devices (vendor Huawei, role OLT), with their island router as "Upstream device".'}),
+      '', 'click an OLT for its dashboard · ONT lists refresh every few polling cycles');
+  }},
+
+  oltview: {title: 'OLT dashboard', hidden: true, perm: 'read', async render(q, id) {
+    const params = new URLSearchParams();
+    for (const k of ['port', 'status', 'signal', 'q', 'sort', 'limit', 'offset']) if (q.get(k)) params.set(k, q.get(k));
+    params.set('olt_id', id);
+    const [sm, list] = await Promise.all([api(`/api/olt/${id}/summary`), api('/api/olt/onts?' + params)]);
+    const c = sm.counts, net = can('network');
+    const link = (k, v) => { const p = new URLSearchParams(q); ['status', 'signal', 'offset'].forEach(x => p.delete(x)); if (k) p.set(k, v); return `#/oltview/${id}?${p}`; };
+    const card = (label, value, href, cls = '') => `<div class="card click-card" data-act="go" data-href="${val(href)}"><div class="label">${esc(label)}</div><div class="value ${cls}">${esc(value)}</div></div>`;
+    const cards = `<div class="cards cards-6">
+      <div class="card click-card ${sm.autofind.length ? 'alert-card' : ''}" data-act="olt-waiting" data-id="${val(id)}"><div class="label">Waiting authorization</div><div class="value">${esc(sm.autofind.length)}</div><div class="note">autofind ${ago(sm.autofind_at)}</div></div>
+      ${card('Total ONTs', c.total, link())}${card('Online', c.online, link('status', 'online'), 's-ok')}${card('Offline', c.offline, link('status', 'offline'), 's-offline')}
+      ${card('Good', c.good, link('signal', 'good'), 's-ok')}${card('Acceptable', c.acceptable, link('signal', 'acceptable'))}
+      ${card('Weak', c.weak, link('signal', 'weak'), 's-warning')}${card('Bad', c.bad, link('signal', 'bad'), 's-critical')}</div>`;
+    const head = `<p class="muted">${esc(sm.olt.host)} · ${esc(sm.olt.model || 'Huawei')} · ${tag(sm.olt.status)} · seen ${ago(sm.olt.last_seen_at)} · PPPoE NAS: ${esc(sm.nas ? sm.nas.name : 'not set (Devices → Edit → Upstream device)')}
+      ${sm.olt.last_poll_error ? `<br><span class="error">${esc(sm.olt.last_poll_error)}</span>` : ''}</p>
+      <p class="muted">Signal: good ≥ ${esc(sm.thresholds.good)} dBm · acceptable ≥ ${esc(sm.thresholds.acceptable)} · weak ≥ ${esc(sm.thresholds.weak)} · bad below</p>`;
+    const filters = `<form class="grid-form" data-form="olt-filter" data-id="${val(id)}">${fields([
+      ['port', 'Port', 'select', {options: [['', 'All ports']].concat(sm.ports.map(p => [p.port, `${p.port} (${p.online}/${p.total})`]))}],
+      ['status', 'Status', 'select', {options: [['', 'Any'], ['online', 'Online'], ['offline', 'Offline']]}],
+      ['signal', 'Signal', 'select', {options: [['', 'Any'], ['good', 'Good'], ['acceptable', 'Acceptable'], ['weak', 'Weak'], ['bad', 'Bad'], ['unknown', 'No reading']]}],
+      ['q', 'Search description, serial, account', 'text'],
+      ['sort', 'Sort', 'select', {options: [['port', 'Port / ONT'], ['signal', 'Weakest signal first'], ['description', 'Description'], ['last_seen', 'Last seen']]}],
+      ['limit', 'Rows', 'select', {options: [['100', '100'], ['250', '250'], ['1000', '1000']]}]], Object.fromEntries(q))}
+      <div class="actions end"><button class="btn" type="submit">Apply</button><button class="btn" type="button" data-act="go" data-href="#/oltview/${val(id)}">Clear</button></div></form>`;
+    const off = Number(q.get('offset') || 0), lim = Number(q.get('limit') || 100);
+    const page = o => { const p = new URLSearchParams(q); p.set('offset', o); return `#/oltview/${id}?${p}`; };
+    const pager = list.total > lim ? `<div class="actions">${off > 0 ? btn('‹ Previous', 'go', {href: page(Math.max(0, off - lim))}) : ''}
+      <span class="muted">${off + 1}–${Math.min(off + lim, list.total)} of ${list.total}</span>
+      ${off + lim < list.total ? btn('Next ›', 'go', {href: page(off + lim)}) : ''}</div>` : '';
+    const sig = (v, r) => r.run_state !== 'online' ? '<span class="tag s-offline">offline</span>' :
+      `<span class="tag s-${val({good: 'ok', acceptable: 'info', weak: 'warning', bad: 'critical', unknown: 'unknown'}[r.signal])}">${esc(r.signal)}</span><br>${dbm(r.rx_power_dbm)}${r.temperature_c != null ? `<br><span class="muted">${esc(r.temperature_c)} °C</span>` : ''}`;
+    return panel(sm.olt.name, head + cards) + panel('ONTs', filters + table(list.rows, [
+      ['frame', 'ONT', (v, r) => `<b>${esc(`${r.frame}/${r.slot}/${r.port} ONT ${r.ont_id}`)}</b><br><span class="muted">${esc(r.serial)}</span>`],
+      ['description', 'Description', (v, r) => `${esc(v)}${r.account_number ? `<br><a href="#/subscriber/${val(r.subscriber_id)}" class="tag">${esc(r.account_number)}</a>` : ''}`],
+      ['signal', 'Signal', sig], ['olt_rx_power_dbm', 'OLT Rx', dbm],
+      ['last_seen_at', 'Seen', (v, r) => r.run_state === 'online' ? '<span class="s-ok">now</span>' : ago(v)],
+      ['polled_at', 'Polled', ago],
+      ['id', 'Actions', (oid, r) => [btn('Signal', 'ont-signal', {id: oid}), net ? btn('Config', 'ont-config', {id: oid, name: r.description || r.serial}) : '',
+        net && r.run_state === 'online' ? btn('Reboot', 'ont-reboot', {id: oid, name: r.description || r.serial}) : '',
+        net ? btn(r.control === 'deactivated' ? 'Enable' : 'Disable', 'ont-state', {id: oid, active: r.control === 'deactivated' ? '1' : '', name: r.description || r.serial}, r.control === 'deactivated' ? '' : 'danger') : ''].join(' ')]],
+      {empty: 'No ONTs match. The list fills after the first OLT poll.'}) + pager, '', `${list.total} ONTs`);
   }},
 
   threats: {title: 'Threat protection', group: 'INFRASTRUCTURE', nav: '⛔ Threat protection', perm: 'read', async render(q) {
@@ -532,7 +573,7 @@ const ACTIONS = {
       ['cred_snmp', 'SNMP community (airFiber)', 'password'],
       ['ssh_host_key', 'Pinned SSH host key (OLT)', 'text', {placeholder: 'SHA256:...'}],
       ['poll_enabled', 'Monitor this device', 'check'],
-      ['settings', 'Settings JSON — OLT: {"gpon_slots":[1]}', 'json'], ['notes', 'Notes', 'textarea']], dev), 'Save', {id: d.id || ''}));
+      ['settings', 'Settings JSON (optional) — OLT with several frames: {"frames":[0,1]}', 'json'], ['notes', 'Notes', 'textarea']], dev), 'Save', {id: d.id || ''}));
   },
   async 'device-poll'(d) { toast('Polling…'); const r = await api(`/api/devices/${d.id}/poll`, 'POST'); toast(`Poll done: ${JSON.stringify(r)}`); reload(); },
   async 'device-audit'(d) {
@@ -569,7 +610,26 @@ const ACTIONS = {
         ['ont_id', 'ONT ID (blank = next free)', 'number'], ['line_profile_id', 'ont-lineprofile-id', 'number', {required: true}],
         ['service_profile_id', 'ont-srvprofile-id', 'number', {required: true}], ['vlan', 'Service VLAN', 'number', {required: true}], ['gemport', 'GEM port', 'number', {default: 1}]]), 'Create change request'));
   },
-  async 'ont-reboot'(d) { if (confirmAct('Request an ONT reboot (needs approval)?')) { const r = await api(`/api/olt/onts/${d.id}/reboot`, 'POST'); location.hash = `#/change/${r.change_id}`; } },
+  async 'ont-reboot'(d) {
+    if (!confirmAct(`Reboot ONT ${d.name} now? The customer is offline for about 2 minutes.`)) return;
+    toast('Rebooting…'); await api(`/api/olt/onts/${d.id}/reboot`, 'POST'); toast(`Reboot sent to ${d.name}`);
+  },
+  async 'ont-signal'(d) { toast('Reading signal from the OLT…'); const r = await api(`/api/olt/onts/${d.id}/signal`); toast(`ONT Rx ${r.rx_power_dbm ?? '—'} dBm · OLT Rx ${r.olt_rx_power_dbm ?? '—'} dBm · ${r.temperature_c ?? '—'} °C`); reload(); },
+  async 'ont-config'(d) {
+    modal(`<h2>OLT config · ${esc(d.name)}</h2><p class="muted">Read-only: display commands only.</p><pre id="ont-cfg">Reading from the OLT…</pre>${btn('Copy', 'copy', {target: 'ont-cfg'})}`);
+    try { $('#ont-cfg').textContent = (await api(`/api/olt/onts/${d.id}/config`)).text; } catch (e) { $('#ont-cfg').textContent = e.message; }
+  },
+  async 'ont-state'(d) {
+    const on = !!d.active;
+    if (!confirmAct(on ? `Re-enable ONT ${d.name}?` : `Disable ONT ${d.name}? The customer loses service until it is enabled again.`)) return;
+    await api(`/api/olt/onts/${d.id}/state`, 'POST', {active: on}); toast(`ONT ${on ? 'enabled' : 'disabled'}`); reload();
+  },
+  async 'olt-waiting'(d) {
+    const sm = await api(`/api/olt/${d.id}/summary`);
+    modal(`<h2>Waiting authorization</h2><p class="muted">From the last poll (${ago(sm.autofind_at)}). ${can('network') ? btn('Ask the OLT now', 'olt-autofind', {id: d.id}) : ''}</p>` +
+      table(sm.autofind, [['frame', 'F/S/P', (v, r) => esc(`${r.frame}/${r.slot}/${r.port}`)], ['serial', 'Serial'], ['equipment_id', 'Model'], ['found_at', 'Found'],
+        ['serial', '', (v, r) => can('network') ? btn('Provision', 'ont-provision', {olt: d.id, serial: r.serial, frame: r.frame, slot: r.slot, port: r.port}, 'primary') : '']], {empty: 'No unregistered ONTs.'}));
+  },
 
   async 'threat-block'(d) {
     modal('<h2>Block an address on all routers</h2><p class="muted">Added to the blocklist of every MikroTik within a minute. Private, management and RADIUS addresses are refused.</p>' +
@@ -631,6 +691,7 @@ const ACTIONS = {
 
 const FORMS = {
   async island(data, f) { await api(f.dataset.id ? `/api/islands/${f.dataset.id}` : '/api/islands', f.dataset.id ? 'PUT' : 'POST', data); closeModal(); reload(); },
+  async 'olt-filter'(data, f) { const p = new URLSearchParams(Object.entries(data).filter(([, v]) => v)); location.hash = `#/oltview/${f.dataset.id}?${p}`; },
   async 'sub-filter'(data) { const p = new URLSearchParams(Object.entries(data).filter(([, v]) => v)); location.hash = '#/subscribers' + (p.toString() ? '?' + p : ''); },
   async subscriber(data, f) {
     if (f.dataset.id) { await api(`/api/subscribers/${f.dataset.id}`, 'PUT', data); closeModal(); reload(); return; }
@@ -735,7 +796,7 @@ async function route() {
   const [path, qs] = (location.hash.slice(2) || 'dashboard').split('?');
   const [key, id] = path.split('/');
   const page = PAGES[key] && can(PAGES[key].perm) ? PAGES[key] : PAGES.dashboard;
-  const navKey = {subscriber: 'subscribers', device: 'devices', change: 'changes'}[key] || key;
+  const navKey = {subscriber: 'subscribers', device: 'devices', change: 'changes', oltview: 'olt'}[key] || key;
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.page === navKey));
   $('#crumb').textContent = page.nav ? page.nav.slice(2) : page.title;
   $('#title').textContent = page.title;

@@ -58,3 +58,8 @@ MSGOWL_SENDER_ID = os.environ.get("MSGOWL_SENDER_ID", "SatLink")
 SMS_PER_MINUTE = _int("SMS_PER_MINUTE", 40)          # MessageOwl allows 50 POST/min
 SMS_BULK_CHUNK = _int("SMS_BULK_CHUNK", 100)         # recipients per bulk POST (broadcasts)
 SMS_REMINDER_DAYS = _int("SMS_REMINDER_DAYS", 3)     # due_reminder this many days before due date
+
+# ONT signal buckets (ONT Rx dBm): >= GOOD good, >= ACCEPTABLE acceptable, >= WEAK weak, below that bad.
+ONT_RX_GOOD = float(os.environ.get("ONT_RX_GOOD", "-25"))
+ONT_RX_ACCEPTABLE = float(os.environ.get("ONT_RX_ACCEPTABLE", "-27"))
+ONT_RX_WEAK = float(os.environ.get("ONT_RX_WEAK", "-29"))

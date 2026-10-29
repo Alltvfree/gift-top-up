@@ -51,22 +51,28 @@ def poll_device(device: dict, with_olt: bool = False) -> dict:
                 m["uptime_s"] = r["uptime_s"]
                 m["extra"].update(r["extra"])
         elif device["vendor"] == "huawei" and device["role"] == "olt" and with_olt and device.get("credentials_enc"):
-            m["extra"]["onts"] = poll_olt(device)
+            r = poll_olt(device)
+            m["extra"]["onts"] = r["onts"]
+            m["extra"]["autofind"] = r["autofind"]
+            m["extra"]["ont_total"] = len(r["onts"])
+            m["extra"]["ont_online"] = sum(o["run_state"] == "online" for o in r["onts"])
     except Exception as exc:  # one broken device must never stop the sweep
         m["error"] = f"{type(exc).__name__}: {exc}"[:300]
     return m
 
 
-def poll_olt(device: dict) -> list[dict]:
-    slots = (device.get("settings") or {}).get("gpon_slots") or [1]
+def poll_olt(device: dict) -> dict:
+    """All ONTs (one command per frame), optical levels of the online ones, and the autofind queue."""
+    frames = (device.get("settings") or {}).get("frames") or [0]
     found = []
     with dev.olt(device) as olt:
-        for slot in slots:
-            for o in olt.ont_list(0, int(slot)):
-                if o["run_state"] == "online":
-                    o.update(olt.optical(o["frame"], o["slot"], o["port"], o["ont_id"]))
-                found.append(o)
-    return found
+        for frame in frames:
+            found += olt.ont_list_frame(int(frame))
+        optical = olt.optical_many([o for o in found if o["run_state"] == "online"])
+        waiting = olt.autofind()
+    for o in found:
+        o.update(optical.get((o["frame"], o["slot"], o["port"], o["ont_id"]), {}))
+    return {"onts": found, "autofind": waiting}
 
 
 def _notify(text: str):
@@ -128,17 +134,22 @@ def store(conn, device: dict, m: dict):
 def store_onts(conn, device, onts):
     for o in onts:
         conn.execute(
-            """INSERT INTO onts(olt_device_id,frame,slot,port,ont_id,serial,run_state,rx_power_dbm,olt_rx_power_dbm,last_seen_at)
+            """INSERT INTO onts(olt_device_id,frame,slot,port,ont_id,serial,run_state,rx_power_dbm,olt_rx_power_dbm,last_seen_at,
+                                description,temperature_c,polled_at,control)
                VALUES (%(olt)s,%(frame)s,%(slot)s,%(port)s,%(ont_id)s,%(serial)s,%(run_state)s,%(rx)s,%(olt_rx)s,
-                       CASE WHEN %(run_state)s='online' THEN now() END)
+                       CASE WHEN %(run_state)s='online' THEN now() END, %(description)s, %(temp)s, now(), %(control)s)
                ON CONFLICT (olt_device_id,serial) DO UPDATE SET frame=EXCLUDED.frame, slot=EXCLUDED.slot, port=EXCLUDED.port,
-                 ont_id=EXCLUDED.ont_id, run_state=EXCLUDED.run_state,
-                 rx_power_dbm=COALESCE(EXCLUDED.rx_power_dbm, onts.rx_power_dbm),
+                 ont_id=EXCLUDED.ont_id, run_state=EXCLUDED.run_state, polled_at=now(),
+                 control=COALESCE(EXCLUDED.control, onts.control),
+                 description=COALESCE(EXCLUDED.description, onts.description),
+                 temperature_c=CASE WHEN EXCLUDED.run_state='online' THEN COALESCE(EXCLUDED.temperature_c, onts.temperature_c) END,
+                 rx_power_dbm=CASE WHEN EXCLUDED.run_state='online' THEN COALESCE(EXCLUDED.rx_power_dbm, onts.rx_power_dbm) END,
                  olt_rx_power_dbm=COALESCE(EXCLUDED.olt_rx_power_dbm, onts.olt_rx_power_dbm),
                  last_seen_at=COALESCE(EXCLUDED.last_seen_at, onts.last_seen_at)""",
-            {"olt": device["id"], **o, "rx": o.get("rx_power_dbm"), "olt_rx": o.get("olt_rx_power_dbm")},
+            {"olt": device["id"], **o, "rx": o.get("rx_power_dbm"), "olt_rx": o.get("olt_rx_power_dbm"),
+             "description": o.get("description"), "temp": o.get("temperature_c"), "control": o.get("control")},
         )
-        rx = o.get("rx_power_dbm")
+        rx = o.get("rx_power_dbm") if o.get("run_state") == "online" else None
         _alert(conn, device, f"ont_low_rx:{o['serial']}", "warning",
                f"ONT {o['serial']} ({o['frame']}/{o['slot']}/{o['port']}:{o['ont_id']}) rx {rx} dBm",
                rx is not None and rx < config.ONT_LOW_RX_DBM)

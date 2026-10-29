@@ -64,7 +64,14 @@ Roll out to one island first, then the rest.
 * Create a dedicated SSH user on the OLT; disable telnet; restrict SSH with an ACL to the platform/NOC IPs.
 * Get the OLT's SSH host key fingerprint **from the console**, and paste it (`SHA256:...`) in the device's *Pinned SSH host key*.
   The platform refuses to connect to an OLT whose key is unknown or has changed.
-* Device settings JSON: `{"gpon_slots": [1]}` — the GPON board slot(s) to scan.
+* Set the OLT's **Upstream device** to the island MikroTik that runs its PPPoE (the "PPPoE NAS" mapping).
+* Every `OLT_POLL_EVERY_N` polls the worker runs `display ont info 0 all` (every board in one command, with
+  descriptions), reads optical levels of the online ONTs and the autofind queue. OLTs with more than one frame:
+  settings `{"frames": [0, 1]}`. Signal buckets: `ONT_RX_GOOD` (-25), `ONT_RX_ACCEPTABLE` (-27), `ONT_RX_WEAK` (-29) dBm.
+* *Smart OLT* lists every OLT; click one for its dashboard (waiting authorization, online/offline, good/acceptable/
+  weak/bad), a filterable ONT list and per-ONT Signal / Config / Reboot / Disable. Those everyday actions run
+  directly for the noc role and are audit-logged; provisioning, delete and move stay as approved changes.
+* **Use SSH, not telnet, and change the OLT's default root password.**
 * Every `OLT_POLL_EVERY_N` cycles the worker reads ONT state and optical levels; ONT Rx below `ONT_LOW_RX_DBM` (−27) raises an alert.
 * *Smart OLT → Autofind* lists unregistered ONTs; *Provision* builds a change request:
   ```

@@ -114,3 +114,40 @@ def test_olt_error_detection():
         olt.cmd("ont add 0 1 bad")
     with pytest.raises(huawei.OLTError):
         olt.cmd("ont delete 0 9")
+
+
+# ---------- real MA5608T output (descriptions anonymised, layout untouched)
+from pathlib import Path
+
+REAL = (Path(__file__).parent / "fixtures" / "ma5608t_display_ont_info_0_all.txt").read_text()
+
+
+def test_real_ma5608t_frame_listing():
+    rows = huawei.parse_ont_info_table(REAL)
+    assert len(rows) == 31 + 14 + 12 + 22 + 28 + 2 + 1 + 1          # every port of slot 1
+    totals = huawei.parse_port_totals(REAL)
+    assert totals[(0, 1, 0)] == {"total": 31, "online": 15} and totals[(0, 1, 7)] == {"total": 1, "online": 1}
+    for (f, s, p), t in totals.items():                                  # parser agrees with the OLT's own counts
+        port_rows = [r for r in rows if (r["frame"], r["slot"], r["port"]) == (f, s, p)]
+        assert len(port_rows) == t["total"] and sum(r["run_state"] == "online" for r in port_rows) == t["online"]
+    first = rows[0]
+    assert (first["frame"], first["slot"], first["port"], first["ont_id"], first["serial"], first["run_state"]) == \
+        (0, 1, 0, 0, "485754434C62729B", "offline")
+    assert all(r["description"] for r in rows)                           # every ONT got its description
+    by_id = {(r["port"], r["ont_id"]): r for r in rows}
+    assert by_id[(4, 100)]["serial"] == "485754436EF52196"               # 3-digit ONT id
+    assert " 5G" in by_id[(2, 9)]["description"]                         # description with a space
+    assert by_id[(0, 10)]["description"] == by_id[(0, 10)]["description"].strip()   # trailing spaces trimmed
+    assert by_id[(4, 60)]["description"].islower()
+
+
+def test_empty_answers_and_yes_no():
+    olt = make_olt({"display ont autofind all": "  Failure: The automatically found ONTs do not exist",
+                    "display ont info 3 all": "  Failure: There is no ONT available"})
+    assert olt.autofind() == []
+    assert olt.ont_list_frame(3) == []
+    yn = make_olt({})
+    yn.shell.queue.append("quit\n  Check whether system data has been changed.\nAre you sure to log out? (y/n)[n]:")
+    with pytest.raises(huawei.OLTError, match="yes/no"):
+        yn._read_until_prompt()
+    assert yn.shell.sent[-1] == "n\n"

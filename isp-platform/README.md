@@ -12,7 +12,7 @@ Monitoring, configuration, billing and RADIUS for an island ISP:
 | Billing | Monthly invoices (MVR), payment allocation oldest-first, auto-overdue, auto-suspend after a grace period, auto-restore when paid. |
 | SMS (MessageOwl) | Automatic invoice / reminder / payment / suspended / restored messages (editable templates), one-off SMS, outage notices to a whole island in bulk, full message log. |
 | Import from DMA | CSV import of subscribers and NAS from DMA Radius Manager with a dry-run preview; imported customers stay billed by DMA until switched over ([docs/MIGRATE-FROM-DMA.md](docs/MIGRATE-FROM-DMA.md)). |
-| Smart OLT | Autofind unregistered ONTs, provision ONT + PPPoE + service-port as a reviewed change, reboot ONT, optical levels per subscriber. |
+| Smart OLT | All OLTs at a glance; per-OLT dashboard (waiting authorization, online/offline, good/acceptable/weak/bad signal) with a filterable ONT list (port, status, signal, description/serial/account search); per-ONT live signal, read config, reboot, enable/disable (audited); autofind + provisioning as reviewed changes. Parser verified against real MA5608T output. |
 
 ## Layout
 ```

@@ -14,6 +14,9 @@ from .sshpin import PinnedKeyPolicy
 PROMPT = re.compile(r"(\n|^)[\w.\-]+(\([\w\-/]+\))?[>#]\s*$")
 MORE = re.compile(r"-+\s*More\s*\(.*?\)\s*-+|---- More ----")
 CR_PROMPT = re.compile(r"\{\s*<cr>.*\}:\s*$", re.S)
+YES_NO = re.compile(r"\(y/n\)\[[yn]\]:\s*$")
+# "Failure: The automatically found ONTs do not exist" / "There is no ONT available": an empty answer, not an error
+EMPTY = re.compile(r"Failure:\s*(The automatically found ONTs do not exist|There is no ONT available|The ONT does not exist)", re.I)
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
@@ -44,11 +47,20 @@ class HuaweiOLT:
     def __exit__(self, *exc):
         self.close()
 
-    def _read_until_prompt(self) -> str:
+    def _read_until_prompt(self, confirm: bool = False) -> str:
+        # Idle timeout: a big OLT prints for a long time, so every chunk received extends the deadline.
         buf, deadline = "", time.time() + self.timeout
         while time.time() < deadline:
             if self.shell.recv_ready():
                 buf += ANSI.sub("", self.shell.recv(65535).decode(errors="replace"))
+                deadline = time.time() + self.timeout
+                if YES_NO.search(buf[-200:]):
+                    if confirm:              # a command a person chose to run (reboot, approved change)
+                        self.shell.send("y\n")
+                        buf += "y\n"
+                        continue
+                    self.shell.send("n\n")  # never confirm anything we did not plan for
+                    raise OLTError("OLT asked for a yes/no confirmation (answered no):\n" + buf.strip()[-300:])
                 if MORE.search(buf[-200:]):
                     buf = MORE.sub("", buf)
                     self.shell.send(" ")
@@ -62,32 +74,69 @@ class HuaweiOLT:
                 time.sleep(0.1)
         raise OLTError("Timed out waiting for OLT prompt")
 
-    def cmd(self, command: str) -> str:
+    def cmd(self, command: str, confirm: bool = False) -> str:
         self.shell.send(command + "\n")
-        out = self._read_until_prompt()
+        out = self._read_until_prompt(confirm)
         if re.search(r"^\s*% (Unknown command|Parameter error|Incomplete command)", out, re.M) or "Failure:" in out:
             raise OLTError(f"`{command}` failed:\n{out.strip()[-500:]}")
         return out
 
     def run_lines(self, lines: list[str]) -> str:
-        return "\n".join(f"> {line}\n{self.cmd(line).strip()}" for line in lines)
+        # Lines of an approved plan: their confirmation questions are part of what was approved.
+        return "\n".join(f"> {line}\n{self.cmd(line, confirm=True).strip()}" for line in lines)
+
+    def on_board(self, frame: int, slot: int, command: str, confirm: bool = False) -> str:
+        self.cmd(f"interface gpon {int(frame)}/{int(slot)}")
+        try:
+            return self.cmd(command, confirm=confirm)
+        finally:
+            self.cmd("quit")
+
+    def ont_config(self, frame, slot, port, ont_id) -> str:
+        """Read-only: the ONT's lines from current-configuration plus its service-ports."""
+        parts = []
+        for c in (f"display current-configuration ont {frame}/{slot}/{port} {ont_id}",
+                  f"display service-port port {frame}/{slot}/{port} ont {ont_id}"):
+            try:
+                parts.append(f"> {c}\n{self.query(c).strip()}")
+            except OLTError as exc:
+                parts.append(f"> {c}\n(not supported on this firmware: {str(exc).splitlines()[-1][:120]})")
+        return "\n\n".join(parts)
+
+    def query(self, command: str) -> str:
+        """Read-only command where "nothing found" is a normal (empty) answer."""
+        try:
+            return self.cmd(command)
+        except OLTError as exc:
+            if EMPTY.search(str(exc)):
+                return ""
+            raise
 
     # ---- read-only
     def autofind(self):
-        return parse_autofind(self.cmd("display ont autofind all"))
+        return parse_autofind(self.query("display ont autofind all"))
 
-    def ont_list(self, frame: int, slot: int):
-        self.cmd(f"interface gpon {frame}/{slot}")
-        try:
-            out = ""
-            for port in range(16):  # ports without ONTs (or past the board's last port) answer "Failure"
-                try:
-                    out += self.cmd(f"display ont info {port} all")
-                except OLTError:
-                    continue
-            return parse_ont_info_table(out)
-        finally:
-            self.cmd("quit")
+    def ont_list_frame(self, frame: int = 0) -> list[dict]:
+        """Every ONT on every GPON board of a frame, with descriptions, in one command (config mode)."""
+        return parse_ont_info_table(self.query(f"display ont info {int(frame)} all"))
+
+    def optical_many(self, onts: list[dict]) -> dict:
+        """Optical levels for several ONTs, entering each board's interface once. {(f,s,p,id): {...}}"""
+        out = {}
+        by_board = {}
+        for o in onts:
+            by_board.setdefault((o["frame"], o["slot"]), []).append(o)
+        for (frame, slot), items in by_board.items():
+            self.cmd(f"interface gpon {frame}/{slot}")
+            try:
+                for o in items:
+                    try:
+                        out[(frame, slot, o["port"], o["ont_id"])] = parse_optical(self.cmd(f"display ont optical-info {o['port']} {o['ont_id']}"))
+                    except OLTError:
+                        continue  # went offline between the list and this read
+            finally:
+                self.cmd("quit")
+        return out
 
     def optical(self, frame, slot, port, ont_id):
         self.cmd(f"interface gpon {frame}/{slot}")
@@ -123,11 +172,41 @@ ONT_ROW = re.compile(
     r"^\s*(\d+)/\s*(\d+)/\s*(\d+)\s+(\d+)\s+([0-9A-Fa-f]{16})\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)", re.M)
 
 
+DESC_HEADER = re.compile(r"^\s*F/S/P\s+ONT-ID\s+Description\s*$", re.I)
+DESC_ROW = re.compile(r"^\s*(\d+)/\s*(\d+)/\s*(\d+)\s+(\d+)(?:\s+(.*?))?\s*$")
+PORT_TOTAL = re.compile(r"In port\s+(\d+)/\s*(\d+)/\s*(\d+)\s*,\s*the total of ONTs are:\s*(\d+),\s*online:\s*(\d+)", re.I)
+
+
+def parse_ont_descriptions(text: str) -> dict:
+    """{(f,s,p,ont_id): description} from the 'F/S/P ONT-ID Description' tables."""
+    out, inside = {}, False
+    for line in text.splitlines():
+        if DESC_HEADER.match(line):
+            inside = "header"
+            continue
+        if inside and set(line.strip()) <= {"-"}:
+            inside = True if inside == "header" else False   # dashes under the header, then the closing dashes
+            continue
+        if inside is True:
+            m = DESC_ROW.match(line)
+            if m:
+                out[(int(m[1]), int(m[2]), int(m[3]), int(m[4]))] = (m[5] or "").strip()
+    return out
+
+
+def parse_port_totals(text: str) -> dict:
+    return {(int(m[1]), int(m[2]), int(m[3])): {"total": int(m[4]), "online": int(m[5])} for m in PORT_TOTAL.finditer(text)}
+
+
 def parse_ont_info_table(text: str) -> list[dict]:
-    return [{
-        "frame": int(m[1]), "slot": int(m[2]), "port": int(m[3]), "ont_id": int(m[4]),
-        "serial": m[5].upper(), "control": m[6], "run_state": m[7], "config_state": m[8], "match_state": m[9],
-    } for m in ONT_ROW.finditer(text)]
+    desc = parse_ont_descriptions(text)
+    rows = []
+    for m in ONT_ROW.finditer(text):
+        key = (int(m[1]), int(m[2]), int(m[3]), int(m[4]))
+        rows.append({"frame": key[0], "slot": key[1], "port": key[2], "ont_id": key[3], "serial": m[5].upper(),
+                     "control": m[6], "run_state": m[7], "config_state": m[8], "match_state": m[9],
+                     "description": desc.get(key)})
+    return rows
 
 
 def _dbm(text, label):

@@ -58,3 +58,5 @@ ol.steps{font-size:12px;color:#d0daea;padding-left:18px;line-height:1.8}
 .logo{display:block;width:100%;max-width:206px;height:auto;margin:0 0 8px;background:#fff;border-radius:10px;padding:6px 8px;box-sizing:border-box}
 .login-card .logo{max-width:280px;margin:0 auto 2px}.login-card .subbrand{text-align:center;margin-bottom:12px}
 @media(max-width:900px){aside .logo{max-width:160px}}
+.cards-6{grid-template-columns:repeat(auto-fill,minmax(118px,1fr))}.click-card{cursor:pointer}.click-card:hover{border-color:var(--accent)}
+.alert-card{background:linear-gradient(145deg,#1d3a8a,#13286b);border-color:#3b63d8}.s-ok.value,.value.s-ok{color:var(--ok)}
