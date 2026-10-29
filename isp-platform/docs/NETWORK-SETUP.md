@@ -51,6 +51,16 @@ Roll out to one island first, then the rest.
    Test this once on a lab router before trusting it on a remote island.
 5. Island routers: the generator also sets up the PPPoE server on the OLT-facing VLAN with RADIUS, accounting (interim 5 min), and the `CUSTOMER` interface list via the PPP profile.
 
+### Routers on RouterOS 6, or monitored by SNMP only
+RouterOS 6 has no REST API. Such routers can still be **monitored over SNMP** (uptime, CPU, memory, PPPoE count, down interfaces):
+```
+/snmp set enabled=yes
+/snmp community set [find default=yes] name=<long-random-community> addresses=<platform IP>/32 read-access=yes write-access=no
+```
+Add the router under *Devices* with only the **SNMP community** filled in (login empty). Blocklist sync, change apply and
+"Reach OLT through router" need the REST login, so on RouterOS 6 they are skipped (threats are still detected on v7 routers).
+Never leave the community as `public`, and allow it only from the platform's address.
+
 > No FastTrack on PPPoE routers: it bypasses the queues RADIUS creates, so plan speeds stop working.
 
 ## 3. airFiber backhaul

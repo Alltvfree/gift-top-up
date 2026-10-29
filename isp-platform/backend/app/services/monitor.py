@@ -8,6 +8,7 @@ from psycopg.types.json import Jsonb
 
 from .. import config, db
 from ..adapters import airfiber
+from ..adapters.mikrotik_snmp import MikroTikSNMP
 from ..adapters.ping import ping, tcp_ping
 from ..security import decrypt_json
 from . import devices as dev
@@ -36,7 +37,16 @@ def poll_device(device: dict, with_olt: bool = False) -> dict:
     if not m["reachable"]:
         return m
     try:
-        if device["vendor"] == "mikrotik" and device.get("credentials_enc"):
+        creds = decrypt_json(device.get("credentials_enc")) if device.get("credentials_enc") else {}
+        if device["vendor"] == "mikrotik" and creds.get("snmp_community") and \
+                (not creds.get("username") or (device.get("settings") or {}).get("poll") == "snmp"):
+            # SNMP-only router (RouterOS 6, or no API login): monitoring works, writing needs REST.
+            r = MikroTikSNMP(str(device["management_ip"]), creds["snmp_community"]).poll()
+            m.update({k: v for k, v in r.items() if k != "extra"})
+            m["extra"].update(r["extra"])
+            if r["extra"]["interfaces_down"]:
+                m["error"] = "interfaces down: " + ", ".join(r["extra"]["interfaces_down"])
+        elif device["vendor"] == "mikrotik" and creds.get("username"):
             with dev.mikrotik(device) as ros:
                 r = ros.poll()
                 try:

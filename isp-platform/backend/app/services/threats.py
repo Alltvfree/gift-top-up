@@ -11,6 +11,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 
 from .. import audit, config, db
+from ..security import decrypt_json
 from . import devices as dev
 
 log = logging.getLogger(__name__)
@@ -187,6 +188,8 @@ def sync_all(device_ids: list | None = None) -> dict:
         sql = """SELECT * FROM devices WHERE vendor='mikrotik' AND poll_enabled AND credentials_enc IS NOT NULL
                  AND status IN ('online','degraded')"""
         routers = conn.execute(sql + (" AND id = ANY(%s)" if device_ids else ""), (device_ids,) if device_ids else None).fetchall()
+    # SNMP-only routers (RouterOS 6 / no API login) can be monitored but not written to
+    routers = [d for d in routers if decrypt_json(d["credentials_enc"]).get("username")]
 
     def one(d):
         try:

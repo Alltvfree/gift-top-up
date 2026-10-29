@@ -616,10 +616,10 @@ const ACTIONS = {
       ['management_ip', 'Management IP', 'text'], ['mgmt_port', 'Mgmt port (REST 443 / SSH 22)', 'number'], ['model', 'Model', 'text'],
       ['cred_username', 'Login username', 'text', {placeholder: d.id && dev.has_credentials ? 'stored — leave blank to keep' : ''}],
       ['cred_password', 'Login password', 'password', {placeholder: d.id && dev.has_credentials ? 'stored — leave blank to keep' : ''}],
-      ['cred_snmp', 'SNMP community (airFiber)', 'password'],
+      ['cred_snmp', 'SNMP community (airFiber, or a MikroTik monitored by SNMP: leave login empty)', 'password', {placeholder: d.id && dev.has_credentials ? 'stored — leave blank to keep' : ''}],
       ['ssh_host_key', 'Pinned SSH host key (OLT)', 'text', {placeholder: 'SHA256:...'}],
       ['poll_enabled', 'Monitor this device', 'check'],
-      ['settings', 'Settings JSON (optional) — OLT with several frames: {"frames":[0,1]}', 'json'], ['notes', 'Notes', 'textarea']], dev), 'Save', {id: d.id || ''}));
+      ['settings', 'Settings JSON (optional) — OLT with several frames: {"frames":[0,1]} · MikroTik with both login and SNMP, poll by SNMP: {"poll":"snmp"}', 'json'], ['notes', 'Notes', 'textarea']], dev), 'Save', {id: d.id || ''}));
   },
   async 'device-poll'(d) { toast('Polling…'); const r = await api(`/api/devices/${d.id}/poll`, 'POST'); toast(`Poll done: ${JSON.stringify(r)}`); reload(); },
   async 'device-audit'(d) {
