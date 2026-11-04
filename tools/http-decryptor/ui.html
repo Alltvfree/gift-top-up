@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HTTP Response Decryptor</title>
+<style>
+:root{--bg:#0b1220;--card:#111a2e;--line:#22304d;--text:#e6ecf8;--mut:#8a99b8;--acc:#4f86f7;--bad:#ff6b6b;--ok:#4cd9a0}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:16px}h1{font-size:20px;margin:6px 0 2px}p.s{color:var(--mut);margin:0 0 14px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:800px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+h2{font-size:14px;margin:0 0 10px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}
+label{display:block;font-size:12px;color:var(--mut);margin:8px 0 3px}
+input,select,textarea{width:100%;background:#0b1424;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px;font:13px ui-monospace,monospace}
+textarea{min-height:130px;resize:vertical}.row{display:flex;gap:8px}.row>*{flex:1}
+button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:9px 14px;font-size:14px;cursor:pointer;margin-top:10px}
+button.g{background:#1d2a47}pre{margin:0;white-space:pre-wrap;word-break:break-word;font:13px ui-monospace,monospace;max-height:520px;overflow:auto}
+.err{color:var(--bad)}.ok{color:var(--ok)}table{width:100%;border-collapse:collapse;font-size:12px}
+td,th{padding:5px 6px;border-bottom:1px solid var(--line);text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:420px}
+tr.c{cursor:pointer}tr.c:hover{background:#18243f}.hint{font-size:12px;color:var(--mut)}
+</style></head><body><main>
+<h1>HTTP Response Decryptor</h1>
+<p class="s">For testing your own app. Everything runs on this computer; keys never leave it.</p>
+<div class="grid">
+<div>
+ <div class="card"><h2>1 · Load a capture (optional)</h2>
+  <p class="hint">HTTP Toolkit → <b>Export → Export as HAR</b>, then choose the file. Click a row to use its response.</p>
+  <input type="file" id="har" accept=".har,.json"><div id="entries"></div></div>
+ <div class="card" style="margin-top:14px"><h2>2 · Encrypted body</h2>
+  <textarea id="body" placeholder="Paste the encrypted response body here"></textarea>
+  <div class="row"><div><label>Body encoding</label><select id="body_enc"><option>base64</option><option>hex</option><option value="utf8">raw text</option></select></div>
+  <div><label>JSON field holding it (blank = whole body)</label><input id="field" placeholder="e.g. data or result.payload"></div></div></div>
+</div>
+<div>
+ <div class="card"><h2>3 · How it is encrypted</h2>
+  <div class="row"><div><label>Algorithm</label><select id="algo"><option>aes-cbc</option><option>aes-gcm</option><option>aes-ctr</option><option>aes-ecb</option><option>chacha20-poly1305</option></select></div>
+  <div><label>Padding (CBC/ECB)</label><select id="pad"><option value="1">PKCS7</option><option value="0">none</option></select></div></div>
+  <label>Key</label><input id="key" autocomplete="off" spellcheck="false">
+  <label>Key format</label><select id="key_enc"><option value="utf8">text (UTF-8 bytes)</option><option>hex</option><option>base64</option><option value="sha256">SHA-256 of text</option><option value="md5">MD5 of text</option></select>
+  <div class="row"><div><label>IV location</label><select id="iv_mode"><option value="prefix">first bytes of the body</option><option value="given">I give it below</option><option value="key">same as key (start)</option><option value="zero">all zeros</option></select></div>
+  <div><label>GCM tag position</label><select id="tag_mode"><option value="suffix">at the end</option><option value="prefix">at the start</option></select></div></div>
+  <div class="row"><div><label>IV (if given)</label><input id="iv"></div><div><label>IV format</label><select id="iv_enc"><option>base64</option><option>hex</option><option value="utf8">text</option></select></div></div>
+  <label>AAD (GCM, optional)</label><input id="aad">
+  <button id="go">Decrypt</button> <button class="g" id="auto">Try common layouts</button>
+  <p class="hint">“Try common layouts” runs AES-CBC/GCM/CTR/ECB with the IV in the body, as given, or equal to the key.</p></div>
+ <div class="card" style="margin-top:14px"><h2>Result</h2><div id="status" class="hint">Nothing yet.</div><pre id="out"></pre></div>
+</div></div></main>
+<script>
+const $=i=>document.getElementById(i);
+async function post(p,b){const r=await fetch(p,{method:'POST',headers:{'Content-Type':'application/json','X-Decryptor':'1'},body:JSON.stringify(b)});return r.json();}
+function params(o={}){return {body:$('body').value,algo:$('algo').value,key:$('key').value,key_enc:$('key_enc').value,body_enc:$('body_enc').value,
+ iv:$('iv').value,iv_enc:$('iv_enc').value,iv_mode:$('iv_mode').value,tag_mode:$('tag_mode').value,aad:$('aad').value,field:$('field').value,pad:$('pad').value==='1',...o};}
+function show(r,label){if(r.error){$('status').innerHTML='<span class="err">'+esc(r.error)+'</span>';$('out').textContent='';return false;}
+ $('status').innerHTML='<span class="ok">Decrypted'+(label?' ('+esc(label)+')':'')+' · '+r.bytes+' bytes'+(r.json?' · JSON':'')+'</span>';$('out').textContent=r.text;return true;}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+$('go').onclick=async()=>{if(!$('key').value||!$('body').value){$('status').textContent='Fill in the body and the key.';return;}show(await post('/api/decrypt',params()));};
+$('auto').onclick=async()=>{if(!$('key').value||!$('body').value){$('status').textContent='Fill in the body and the key.';return;}
+ const tries=[];for(const algo of ['aes-cbc','aes-gcm','aes-ctr','aes-ecb'])for(const iv_mode of (algo==='aes-ecb'?['prefix']:['prefix','key','zero']))tries.push({algo,iv_mode});
+ for(const t of tries){const r=await post('/api/decrypt',params(t));if(!r.error&&(r.json||/^[\x09\x0a\x0d\x20-\x7e -￿]{4,}$/.test(r.text.slice(0,200)))){$('algo').value=t.algo;$('iv_mode').value=t.iv_mode;show(r,t.algo+', IV '+t.iv_mode);return;}}
+ $('status').innerHTML='<span class="err">No common layout worked. Check the key, its format, the body encoding and the JSON field.</span>';$('out').textContent='';};
+$('har').onchange=async e=>{const f=e.target.files[0];if(!f)return;const r=await post('/api/har',{har:await f.text()});
+ if(r.error){$('entries').innerHTML='<p class="err">'+esc(r.error)+'</p>';return;}window._e=r;
+ $('entries').innerHTML='<table><tr><th>#</th><th>St</th><th>Method</th><th>Size</th><th>URL</th></tr>'+r.map(x=>'<tr class="c" data-i="'+x.index+'"><td>'+x.index+'</td><td>'+x.status+'</td><td>'+esc(x.method)+'</td><td>'+x.size+'</td><td title="'+esc(x.url)+'">'+esc(x.url)+'</td></tr>').join('')+'</table>';
+ document.querySelectorAll('tr.c').forEach(tr=>tr.onclick=()=>{$('body').value=window._e[tr.dataset.i].body;$('status').textContent='Loaded response #'+tr.dataset.i+'. Enter the key and press Decrypt.';});};
+</script></body></html>
