@@ -692,7 +692,7 @@ const ACTIONS = {
   async 'olt-restore'(d) {
     const targets = (await api('/api/devices')).filter(x => x.vendor === 'huawei' && x.role === 'olt' && x.id !== d.id);
     modal(`<h2>Restore ONTs onto another OLT</h2>
-      <p class="muted">Rebuilds every ONT SatLink has on record for this OLT — serial, port, profiles, VLAN, PPPoE login — onto a replacement, as one change for a second admin to approve. Good for a damaged/dead OLT: the history survives even while it shows offline.</p>
+      <p class="muted">Rebuilds every ONT SatLink has on record for this OLT — serial, port, line/service profile, VLAN — onto a replacement, as one change for a second admin to approve. OLT-side registration only: it does not touch PPPoE/WAN on the ONT, since that's the customer's own router dialing and is already working. Good for a damaged/dead OLT: the history survives even while it shows offline.</p>
       <label>Replacement OLT<select id="restore-target">${targets.map(t => `<option value="${val(t.id)}">${esc(t.name)}${t.island_name ? esc(' · ' + t.island_name) : ''}</option>`).join('') || '<option value="">— no other OLT found —</option>'}</select></label>
       <label>Gemport (same for every restored ONT)<input id="restore-gemport" type="number" value="1" min="0" max="1023"></label>
       ${btn('Preview', 'olt-restore-preview', {id: d.id}, 'primary')}
@@ -705,7 +705,7 @@ const ACTIONS = {
     const r = await api(`/api/olt/${d.id}/restore-preview?${new URLSearchParams({new_olt_id: newId, gemport})}`);
     document.getElementById('restore-preview').innerHTML =
       (r.ready.length ? panel(`Will restore (${r.ready.length})`, table(r.ready, [['serial', 'Serial'], ['frame', 'F/S/P', (v, row) => esc(`${row.frame}/${row.slot}/${row.port}`)],
-        ['ont_id', 'New ONT ID'], ['account_number', 'Account']])) : '<p class="s-warning">Nothing is ready to restore.</p>') +
+        ['ont_id', 'New ONT ID'], ['description', 'Description']])) : '<p class="s-warning">Nothing is ready to restore.</p>') +
       (r.skipped.length ? panel(`Skipped (${r.skipped.length})`, table(r.skipped, [['serial', 'Serial'], ['reason', 'Why']])) : '') +
       (r.ready.length ? btn(`Create change: restore ${r.ready.length} ONTs`, 'olt-restore-create', {id: d.id, new: newId, gemport}, 'primary') : '');
   },

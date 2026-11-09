@@ -48,7 +48,7 @@ def test_restore_preview_and_apply_builds_one_change(admin, two_olts, sql):
     assert prev.status_code == 200, prev.text
     assert prev.json()["skipped"] == [] and len(prev.json()["ready"]) == 1
     ready0 = prev.json()["ready"][0]
-    assert ready0["account_number"] == sub["account_number"] and ready0["frame"] == 0 and ready0["slot"] == 1 and ready0["port"] == 3
+    assert ready0["description"] == sub["account_number"] and ready0["frame"] == 0 and ready0["slot"] == 1 and ready0["port"] == 3
 
     r = admin.post(f"/api/olt/{old_id}/restore-into/{new_id}", json={})
     assert r.status_code == 201, r.text
@@ -59,7 +59,8 @@ def test_restore_preview_and_apply_builds_one_change(admin, two_olts, sql):
     ch = admin.get(f"/api/changes/{cid}").json()
     assert ch["kind"] == "huawei_cli"
     assert "OLD-OLT" in ch["title"] and "NEW-OLT" in ch["title"] and "1 ONTs" in ch["title"]
-    assert f'sn-auth "{ready0["serial"]}"' in ch["plan"] and f'username "{sub["pppoe_username"]}"' in ch["plan"]
+    assert f'sn-auth "{ready0["serial"]}"' in ch["plan"] and "service-port vlan 100" in ch["plan"]
+    assert "pppoe" not in ch["plan"].lower() and "password" not in ch["plan"].lower()  # WAN/PPPoE is not touched
     assert "ont delete" in ch["rollback"]  # rollback present
 
     new_rows = sql("SELECT serial, ont_id, frame, slot, port, subscriber_id FROM onts WHERE olt_device_id=%s", (new_id,))
@@ -82,37 +83,34 @@ def test_ont_id_reassigned_on_new_olt_not_copied(admin, two_olts, sql):
     assert new_ont_id != 0  # 0 was taken, so a different slot had to be picked
 
 
-def test_skips_ont_without_subscriber_link(admin, two_olts, sql):
+def test_restores_ont_with_no_subscriber_link(admin, two_olts, sql):
+    """OLT-side registration only needs what the OLD OLT itself recorded; no subscriber/RADIUS needed."""
     old_id, new_id = two_olts
-    sql("""INSERT INTO onts(olt_device_id,frame,slot,port,ont_id,serial,line_profile_id,service_profile_id,vlan)
-          VALUES (%s,0,2,4,7,'4857544100000001',10,20,100)""", (old_id,))
+    sql("""INSERT INTO onts(olt_device_id,frame,slot,port,ont_id,serial,description,line_profile_id,service_profile_id,vlan)
+          VALUES (%s,0,2,4,7,'4857544100000001','House 12 Faamudheyri',10,20,100)""", (old_id,))
     prev = admin.get(f"/api/olt/{old_id}/restore-preview", params={"new_olt_id": new_id}).json()
-    assert prev["ready"] == [] and len(prev["skipped"]) == 1 and "No subscriber" in prev["skipped"][0]["reason"]
+    assert prev["skipped"] == [] and len(prev["ready"]) == 1
+    assert prev["ready"][0]["description"] == "House 12 Faamudheyri" and prev["ready"][0]["subscriber_id"] is None
 
     r = admin.post(f"/api/olt/{old_id}/restore-into/{new_id}", json={})
-    assert r.status_code == 400 and "No subscriber" in r.json()["detail"]
-
-
-def test_skips_subscriber_without_radius_password(admin, two_olts, sql):
-    old_id, new_id = two_olts
-    sub = mk_subscriber(admin, "3")
-    provision(admin, old_id, sub)
-    sql("DELETE FROM radcheck WHERE username=%s AND attribute='Cleartext-Password'", (sub["pppoe_username"],))
-    prev = admin.get(f"/api/olt/{old_id}/restore-preview", params={"new_olt_id": new_id}).json()
-    assert prev["ready"] == [] and "RADIUS password" in prev["skipped"][0]["reason"]
+    assert r.status_code == 201, r.text
+    assert r.json()["restored"] == 1
+    plan = admin.get(f"/api/changes/{r.json()['change_id']}").json()["plan"]
+    assert "pppoe" not in plan.lower() and 'desc "House 12 Faamudheyri"' in plan
 
 
 def test_one_bad_ont_does_not_block_the_rest(admin, two_olts, sql):
     old_id, new_id = two_olts
     good = mk_subscriber(admin, "4")
     provision(admin, old_id, good, port=1)
-    bad = mk_subscriber(admin, "5")
-    provision(admin, old_id, bad, port=2)
-    sql("DELETE FROM radcheck WHERE username=%s AND attribute='Cleartext-Password'", (bad["pppoe_username"],))
+    # a historical row with an out-of-range VLAN (corrupt/pre-validation data): invalid, not fatal to the batch
+    sql("""INSERT INTO onts(olt_device_id,frame,slot,port,ont_id,serial,line_profile_id,service_profile_id,vlan)
+          VALUES (%s,0,1,2,9,'4857544100000099',10,20,9999)""", (old_id,))
 
     r = admin.post(f"/api/olt/{old_id}/restore-into/{new_id}", json={})
     assert r.status_code == 201, r.text
     assert r.json()["restored"] == 1 and len(r.json()["skipped"]) == 1
+    assert "Invalid vlan" in r.json()["skipped"][0]["reason"]
     assert sql("SELECT count(*) FROM onts WHERE olt_device_id=%s", (new_id,))[0][0] == 1
 
 
@@ -122,7 +120,7 @@ def test_serials_filter_restricts_the_batch(admin, two_olts):
     provision(admin, old_id, a, port=1)
     provision(admin, old_id, b, port=2)
     serial_a = admin.get(f"/api/olt/{old_id}/restore-preview", params={"new_olt_id": new_id}).json()["ready"]
-    want = next(x["serial"] for x in serial_a if x["account_number"] == a["account_number"])
+    want = next(x["serial"] for x in serial_a if x["description"] == a["account_number"])
     r = admin.post(f"/api/olt/{old_id}/restore-into/{new_id}", json={"serials": [want]})
     assert r.json()["restored"] == 1
 

@@ -296,5 +296,33 @@ def build_ont_provision(*, frame, slot, port, ont_id, serial, line_profile_id, s
     return apply, rollback
 
 
+def build_ont_bind(*, frame, slot, port, ont_id, serial, line_profile_id, service_profile_id, vlan, gemport, description) -> tuple[list[str], list[str]]:
+    """ONT add + service-port only -- no OMCI PPPoE/WAN push. For an ONT that bridges straight
+    through to a customer router that already dials PPPoE itself (nothing to configure on the ONT
+    for that), or for re-registering an ONT on a replacement OLT without touching what's already
+    working downstream. Returns (apply_lines, rollback_lines)."""
+    serial = _check(serial.upper(), SN_RE, "serial (16 hex chars)")
+    _check(description, SAFE_TEXT, "description")
+    for name, v, hi in (("frame", frame, 7), ("slot", slot, 21), ("port", port, 15), ("ont_id", ont_id, 127),
+                        ("vlan", vlan, 4094), ("gemport", gemport, 1023)):
+        if not isinstance(v, int) or not 0 <= v <= hi:
+            raise ValueError(f"Invalid {name}")
+    apply = [
+        f"interface gpon {frame}/{slot}",
+        f'ont add {port} {ont_id} sn-auth "{serial}" omci ont-lineprofile-id {line_profile_id} '
+        f'ont-srvprofile-id {service_profile_id} desc "{description}"',
+        "quit",
+        f"service-port vlan {vlan} gpon {frame}/{slot}/{port} ont {ont_id} gemport {gemport} "
+        f"multi-service user-vlan {vlan} tag-transform translate",
+    ]
+    rollback = [
+        f"undo service-port port {frame}/{slot}/{port} ont {ont_id}",
+        f"interface gpon {frame}/{slot}",
+        f"ont delete {port} {ont_id}",
+        "quit",
+    ]
+    return apply, rollback
+
+
 def build_ont_reboot(frame, slot, port, ont_id) -> list[str]:
     return [f"interface gpon {frame}/{slot}", f"ont reset {port} {ont_id}", "quit"]

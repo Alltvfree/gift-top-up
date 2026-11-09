@@ -235,11 +235,12 @@ class RestoreIn(BaseModel):
 
 
 def _restore_plan(conn, new_olt_id, old_olt_id, gemport: int, serials: list[str] | None):
-    """Every ONT SatLink ever provisioned on `old_olt_id`, rebuilt as ont-add + PPPoE + service-port
-    commands for `new_olt_id` (same frame/slot/port; a fresh ont_id assigned on the new OLT so it
-    never collides with whatever is already there). Never raises: an ONT that is missing something
-    (no subscriber link, no RADIUS password, bad serial...) is reported in `skipped`, not fatal to
-    the rest of the batch."""
+    """Every ONT SatLink has on record for `old_olt_id`, rebuilt as ont-add + service-port commands
+    for `new_olt_id` (same frame/slot/port; a fresh ont_id assigned on the new OLT so it never
+    collides with whatever is already there). OLT-side registration only -- no PPPoE/WAN push to
+    the ONT: that's the customer's own router dialing, already working, and not this platform's to
+    touch. Never raises: an ONT missing something it needs (bad serial, no free slot...) is
+    reported in `skipped`, not fatal to the rest of the batch."""
     where = ["olt_device_id=%s", "ont_id IS NOT NULL", "serial IS NOT NULL",
              "line_profile_id IS NOT NULL", "service_profile_id IS NOT NULL", "vlan IS NOT NULL"]
     params = [old_olt_id]
@@ -251,18 +252,6 @@ def _restore_plan(conn, new_olt_id, old_olt_id, gemport: int, serials: list[str]
     used_by_port: dict[tuple, set] = {}
     ready, skipped, apply_lines, rollback_lines = [], [], [], []
     for o in rows:
-        if not o["subscriber_id"]:
-            skipped.append({"serial": o["serial"], "reason": "No subscriber linked (was never fully re-provisioned, or the link was lost)"})
-            continue
-        sub = conn.execute("SELECT * FROM subscribers WHERE id=%s", (o["subscriber_id"],)).fetchone()
-        if not sub:
-            skipped.append({"serial": o["serial"], "reason": "Linked subscriber no longer exists"})
-            continue
-        pw = conn.execute("SELECT value FROM radcheck WHERE username=%s AND attribute='Cleartext-Password'",
-                          (sub["pppoe_username"],)).fetchone()
-        if not pw:
-            skipped.append({"serial": o["serial"], "reason": f"No RADIUS password for {sub['pppoe_username']}; reset it first"})
-            continue
         key = (o["frame"], o["slot"], o["port"])
         if key not in used_by_port:
             used_by_port[key] = {r["ont_id"] for r in conn.execute(
@@ -273,10 +262,10 @@ def _restore_plan(conn, new_olt_id, old_olt_id, gemport: int, serials: list[str]
             skipped.append({"serial": o["serial"], "reason": f"No free ONT slot left on port {key[0]}/{key[1]}/{key[2]} of the new OLT"})
             continue
         try:
-            a, r = huawei.build_ont_provision(
+            a, r = huawei.build_ont_bind(
                 frame=o["frame"], slot=o["slot"], port=o["port"], ont_id=ont_id, serial=o["serial"],
                 line_profile_id=o["line_profile_id"], service_profile_id=o["service_profile_id"], vlan=o["vlan"],
-                gemport=gemport, description=sub["account_number"], pppoe_username=sub["pppoe_username"], pppoe_password=pw["value"])
+                gemport=gemport, description=o["description"] or "")
         except ValueError as exc:
             skipped.append({"serial": o["serial"], "reason": str(exc)})
             continue
@@ -284,8 +273,9 @@ def _restore_plan(conn, new_olt_id, old_olt_id, gemport: int, serials: list[str]
         apply_lines += a
         rollback_lines += r
         ready.append({"serial": o["serial"], "frame": o["frame"], "slot": o["slot"], "port": o["port"], "ont_id": ont_id,
-                      "account_number": sub["account_number"], "subscriber_id": str(sub["id"]), "old_ont_row_id": str(o["id"]),
-                      "line_profile_id": o["line_profile_id"], "service_profile_id": o["service_profile_id"], "vlan": o["vlan"]})
+                      "description": o["description"], "subscriber_id": str(o["subscriber_id"]) if o["subscriber_id"] else None,
+                      "old_ont_row_id": str(o["id"]), "line_profile_id": o["line_profile_id"],
+                      "service_profile_id": o["service_profile_id"], "vlan": o["vlan"]})
     return ready, skipped, apply_lines, rollback_lines
 
 
@@ -318,7 +308,7 @@ def restore_into(old_olt_id: UUID, new_olt_id: UUID, body: RestoreIn, user=Depen
                    ON CONFLICT (olt_device_id,serial) DO UPDATE SET subscriber_id=EXCLUDED.subscriber_id, frame=EXCLUDED.frame,
                    slot=EXCLUDED.slot, port=EXCLUDED.port, ont_id=EXCLUDED.ont_id, vlan=EXCLUDED.vlan""",
                 (new_olt_id, o["subscriber_id"], o["frame"], o["slot"], o["port"], o["ont_id"], o["serial"],
-                 o["account_number"], o["line_profile_id"], o["service_profile_id"], o["vlan"]))
+                 o["description"], o["line_profile_id"], o["service_profile_id"], o["vlan"]))
         change_id = create_change(conn, new_olt_id, f"Restore {len(ready)} ONTs onto {new['name']} from {old['name']}",
                                   "huawei_cli", "\n".join(apply_lines), "\n".join(rollback_lines), user["username"])
         audit.record(user["username"], "olt.restore", "device", new_olt_id,
