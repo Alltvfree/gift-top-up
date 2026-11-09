@@ -248,7 +248,7 @@ const PAGES = {
   }},
 
   device: {title: 'Device', hidden: true, perm: 'read', async render(q, id) {
-    const d = await api(`/api/devices/${id}`);
+    const [d, backupList] = await Promise.all([api(`/api/devices/${id}`), can('network') ? api(`/api/devices/${id}/backups`) : []]);
     const acts = can('network') ? [btn('Edit', 'device-edit', {id}), btn('Poll now', 'device-poll', {id}),
       d.vendor === 'mikrotik' ? btn('Security audit', 'device-audit', {id}, 'primary') : '',
       d.vendor === 'mikrotik' ? btn('Generate firewall', 'go', {href: `#/security?device=${id}`}) : '',
@@ -266,6 +266,7 @@ const PAGES = {
       panel('Recent polls', table(d.metrics.slice(0, 30), [['at', 'When', dt], ['reachable', 'Up', v => v ? '<span class="s-ok">yes</span>' : '<span class="s-critical">no</span>'],
         ['latency_ms', 'Latency ms'], ['packet_loss_pct', 'Loss %'], ['cpu_load_pct', 'CPU %'], ['mem_used_pct', 'Mem %'], ['extra', 'PPPoE', v => esc(v && v.pppoe_active)]], {empty: 'Not polled yet'})) +
       panel('Alerts', table(d.alerts, [['severity', 'Sev', tag], ['kind', 'Kind'], ['message', 'Message'], ['opened_at', 'Opened', dt], ['resolved_at', 'Resolved', dt]], {empty: 'No alerts'})) +
+      (can('network') ? backupsPanel(d, backupList) : '') +
       `<div id="device-extra"></div>`;
   }},
 
@@ -458,6 +459,23 @@ const PAGES = {
   }},
 };
 
+// Config backups (MikroTik /export, Huawei display current-configuration): manual button, history, download.
+function backupsPanel(d, rows) {
+  if (!['mikrotik', 'huawei'].includes(d.vendor)) return '';
+  const interval = (d.settings || {}).backup_interval_hours;
+  const sched = interval === 0 ? 'Scheduled backups are off for this device.'
+    : interval ? `Scheduled every ${esc(interval)}h for this device.` : 'Scheduled with the platform default (edit the device\'s Settings JSON to override: "backup_interval_hours").';
+  const afterChange = (d.settings || {}).backup_after_change === false ? 'Off for this device.' : 'On: every applied change to this device triggers one.';
+  return panel('Config backups', `<p class="muted">${sched} After every edit: ${afterChange}</p>` +
+    table(rows, [['taken_at', 'When', dt], ['source', 'Source', tag],
+      ['ok', 'Result', (v, r) => v ? `<span class="s-ok">ok</span> ${esc(r.size_bytes != null ? bytes(r.size_bytes) : '')}` : `<span class="s-critical">failed</span>`],
+      ['error', 'Error', v => v ? `<span class="s-critical">${esc(v)}</span>` : ''],
+      ['taken_by', 'By', v => esc(v || 'worker')],
+      ['id', '', (id, r) => r.ok ? `<a class="btn small" href="/api/devices/${d.id}/backups/${id}/download" download>Download</a>` : '']],
+      {empty: 'No backups yet.'}),
+    btn('Back up now', 'device-backup', {id: d.id}, 'primary'));
+}
+
 // SSH host key seen by the last poll but not (or no longer) pinned: offer to trust exactly that key.
 function pinOffer(d) {
   const m = /(No pinned host key|HOST KEY CHANGED).*?(SHA256:[A-Za-z0-9+/]{43})/.exec(d.last_poll_error || '');
@@ -635,9 +653,19 @@ const ACTIONS = {
       ['cred_snmp', 'SNMP community (airFiber, or a MikroTik monitored by SNMP: leave login empty)', 'password', {placeholder: d.id && dev.has_credentials ? 'stored — leave blank to keep' : ''}],
       ['ssh_host_key', 'Pinned SSH host key (OLT)', 'text', {placeholder: 'SHA256:...'}],
       ['poll_enabled', 'Monitor this device', 'check'],
-      ['settings', 'Settings JSON (optional) — OLT with several frames: {"frames":[0,1]} · MikroTik with both login and SNMP, poll by SNMP: {"poll":"snmp"}', 'json'], ['notes', 'Notes', 'textarea']], dev), 'Save', {id: d.id || ''}));
+      ['settings', 'Settings JSON (optional) — OLT with several frames: {"frames":[0,1]} · MikroTik with both login and SNMP, poll by SNMP: {"poll":"snmp"} · backups: {"backup_interval_hours":6} (0 disables scheduled) or {"backup_after_change":false}', 'json'], ['notes', 'Notes', 'textarea']], dev), 'Save', {id: d.id || ''}));
   },
   async 'device-poll'(d) { toast('Polling…'); const r = await api(`/api/devices/${d.id}/poll`, 'POST'); toast(`Poll done: ${JSON.stringify(r)}`); reload(); },
+  async 'device-backup'(d) {
+    toast('Reading configuration…');
+    try {
+      const r = await api(`/api/devices/${d.id}/backups`, 'POST');
+      toast(`Backed up: ${r.filename} (${bytes(r.size_bytes)})`);
+    } catch (err) {
+      toast(err.message, true);  // still reload below: the failed attempt is recorded in the history too
+    }
+    reload();
+  },
   async 'device-audit'(d) {
     toast('Reading router…');
     const r = await api(`/api/devices/${d.id}/security-audit`);

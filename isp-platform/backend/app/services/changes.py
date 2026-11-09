@@ -1,6 +1,7 @@
 """Change workflow rules (approve / reject / apply), shared by the web API and the Telegram bot."""
 from .. import audit, config, db
 from ..adapters.ping import ping
+from . import backups
 from . import devices as dev
 from . import telegram
 
@@ -79,4 +80,5 @@ def apply(change_id: int, actor: str) -> dict:
         telegram.change_updated(conn, change_id)
         if ch["requested_by"] != actor:
             telegram.tell_user(conn, ch["requested_by"], f"Change #{change_id} \"{ch['title']}\" on {device['name']}: {status} (by {actor}).")
+    backups.after_change(device, actor, change_id)
     return {"ok": status == "applied", "status": status, "result": result}

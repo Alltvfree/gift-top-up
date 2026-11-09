@@ -2,13 +2,14 @@ from ipaddress import IPv4Address
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
 from .. import audit, db
 from ..deps import ROLES, require
 from ..security import decrypt_json, encrypt_json
+from ..services import backups
 from ..services import devices as dev
 from ..services import firewall, monitor
 
@@ -185,6 +186,44 @@ def pin_host_key(device_id: UUID, body: PinKey, user=Depends(require("network"))
 @router.post("/devices/{device_id}/poll")
 def poll_now(device_id: UUID, user=Depends(require("network"))):
     return monitor.sweep(cycle=0, device_ids=[device_id])
+
+
+# ---------------- config backups (MikroTik /export, Huawei display current-configuration)
+@router.get("/devices/{device_id}/backups")
+def list_backups(device_id: UUID, user=Depends(require("network"))):
+    return db.rows(
+        """SELECT id,source,taken_at,taken_by,change_id,ok,error,filename,size_bytes FROM device_backups
+           WHERE device_id=%s ORDER BY taken_at DESC LIMIT 100""", (device_id,))
+
+
+@router.post("/devices/{device_id}/backups", status_code=201)
+def take_backup(device_id: UUID, user=Depends(require("network"))):
+    d = db.row("SELECT * FROM devices WHERE id=%s", (device_id,))
+    if not d:
+        raise HTTPException(404, "Device not found")
+    if not backups.capable(d):
+        raise HTTPException(400, "This device has no login stored that a config can be pulled with "
+                             "(MikroTik needs the REST username/password, not just an SNMP community)")
+    with db.connect() as conn:
+        r = backups.take(conn, d, "manual", user["username"])
+    if not r["ok"]:
+        raise HTTPException(502, r["error"])
+    audit.record(user["username"], "device.backup", "device", device_id, {"filename": r["filename"]})
+    return r
+
+
+@router.get("/devices/{device_id}/backups/{backup_id}/download")
+def download_backup(device_id: UUID, backup_id: int, user=Depends(require("network"))):
+    with db.connect() as conn:
+        row = backups.content(conn, backup_id)
+        owner = conn.execute("SELECT device_id FROM device_backups WHERE id=%s", (backup_id,)).fetchone()
+    if not owner or str(owner["device_id"]) != str(device_id):
+        raise HTTPException(404, "Backup not found")
+    if not row:
+        raise HTTPException(404, "That backup has no stored content (the attempt failed)")
+    data, filename = row
+    audit.record(user["username"], "device.backup_download", "device", device_id, {"filename": filename})
+    return Response(data, media_type="text/plain", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @router.get("/devices/{device_id}/security-audit")

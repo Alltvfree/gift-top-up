@@ -51,6 +51,15 @@ class RouterOS:
         out = self._req("POST", "execute", {"script": script, "as-string": ""})
         return out.get("ret", "") if isinstance(out, dict) else str(out or "")
 
+    def export_config(self) -> str:
+        """Full /export text, for disaster-recovery backups (store the result encrypted: with
+        show-sensitive it carries real passwords). Falls back to a masked export if the API user
+        lacks the 'sensitive' policy, rather than failing the backup outright."""
+        try:
+            return self.run_script("/export show-sensitive terse")
+        except RouterOSError:
+            return self.run_script("/export terse")
+
     # ---- read-only polling
     def poll(self) -> dict:
         res = self.get("system/resource")

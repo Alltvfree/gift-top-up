@@ -33,6 +33,16 @@ ONT_LOW_RX_DBM = float(os.environ.get("ONT_LOW_RX_DBM", "-27"))
 LATENCY_WARN_MS = float(os.environ.get("LATENCY_WARN_MS", "80"))
 ALERT_WEBHOOK_URL = os.environ.get("ALERT_WEBHOOK_URL", "")
 
+# Device config backups (MikroTik /export, Huawei display current-configuration): gzip + Fernet
+# encrypted, pulled three ways that all stay available side by side:
+#   scheduled    every BACKUP_INTERVAL_HOURS, or a device's own settings.backup_interval_hours
+#                (0 turns scheduled backups off for just that device)
+#   after_change automatically once a change finishes applying to that device
+#                (settings.backup_after_change: false opts a device out)
+#   manual       the "Back up now" button
+BACKUP_INTERVAL_HOURS = _int("BACKUP_INTERVAL_HOURS", 24)
+BACKUP_KEEP_PER_DEVICE = _int("BACKUP_KEEP_PER_DEVICE", 30)
+
 # Change workflow: requester may not approve their own change.
 #   true      another admin must approve (web or Telegram)
 #   telegram  as true, but the requester may approve their own change in Telegram with their 2FA code

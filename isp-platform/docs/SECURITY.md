@@ -9,7 +9,7 @@
 | XSS | strict CSP (`script-src 'self'`, no inline JS), all output escaped |
 | Bots / scanners | nginx allowlist (NOC/VPN only), scanner user-agent drop, per-IP request and connection limits, method allowlist, small body size, short timeouts |
 | Insider mistakes | roles (admin / noc / billing / support), four-eyes approval for every router/OLT change, full audit log |
-| Stolen database dump | device passwords encrypted with `APP_SECRET_KEY` (Fernet); RADIUS uses a separate least-privilege DB role |
+| Stolen database dump | device passwords encrypted with `APP_SECRET_KEY` (Fernet); RADIUS uses a separate least-privilege DB role; config backups (which can carry real router passwords, via `/export show-sensitive`) are gzip + Fernet-encrypted with the same key, never shown in the UI, only downloadable by a `network`-permission user |
 | Router lockout on a remote island | commit-confirm: backup + auto-restore scheduler armed before every MikroTik change |
 | OLT man-in-the-middle | pinned SSH host keys, never trust-on-first-use |
 

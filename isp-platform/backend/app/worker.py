@@ -5,7 +5,7 @@ from datetime import date
 
 from . import config, db
 from .migrate import migrate
-from .services import billing, monitor, radius_sync, sms
+from .services import backups, billing, monitor, radius_sync, sms
 
 log = logging.getLogger("worker")
 
@@ -39,6 +39,10 @@ def main():
                 log.info("sms: %s", result)
         except Exception:
             log.exception("sms sending failed")
+        try:
+            backups.run_scheduled()  # a cheap no-op query when nothing is due yet
+        except Exception:
+            log.exception("scheduled backups failed")
         if last_billing != date.today():
             try:
                 daily_billing()

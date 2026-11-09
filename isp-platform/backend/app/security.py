@@ -77,3 +77,16 @@ def decrypt_json(token: str | None) -> dict:
         return json.loads(_fernet().decrypt(token.encode()))
     except InvalidToken as exc:
         raise RuntimeError("Device credentials cannot be decrypted (APP_SECRET_KEY changed?)") from exc
+
+
+def encrypt_bytes(data: bytes) -> str:
+    return _fernet().encrypt(data).decode()
+
+
+def decrypt_bytes(token: str | None) -> bytes:
+    if not token:
+        return b""
+    try:
+        return _fernet().decrypt(token.encode())
+    except InvalidToken as exc:
+        raise RuntimeError("Backup cannot be decrypted (APP_SECRET_KEY changed?)") from exc
