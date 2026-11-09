@@ -253,6 +253,7 @@ const PAGES = {
       d.vendor === 'mikrotik' ? btn('Security audit', 'device-audit', {id}, 'primary') : '',
       d.vendor === 'mikrotik' ? btn('Generate firewall', 'go', {href: `#/security?device=${id}`}) : '',
       d.vendor === 'huawei' && d.role === 'olt' ? btn('ONT autofind', 'olt-autofind', {id}, 'primary') : '',
+      d.vendor === 'huawei' && d.role === 'olt' ? btn('Restore ONTs onto another OLT', 'olt-restore', {id}) : '',
       ['huawei', 'ubiquiti'].includes(d.vendor) && d.parent_name ? ((d.settings || {}).via_router ? btn('Connect directly', 'olt-access', {id, via: ''})
         : btn(`Reach through ${d.parent_name}`, 'olt-access', {id, via: '1', router: d.parent_name})) : '',
       can('approve') ? btn('Delete', 'device-del', {id}, 'danger') : ''].join('') : '';
@@ -687,6 +688,32 @@ const ACTIONS = {
     const rows = await api(`/api/olt/${d.id}/autofind`);
     modal('<h2>Unregistered ONTs (autofind)</h2>' + table(rows, [['frame', 'F/S/P', (v, r) => esc(`${r.frame}/${r.slot}/${r.port}`)], ['serial', 'Serial'], ['equipment_id', 'Model'], ['found_at', 'Found'],
       ['serial', '', (v, r) => btn('Provision', 'ont-provision', {olt: d.id, serial: r.serial, frame: r.frame, slot: r.slot, port: r.port}, 'primary')]], {empty: 'No new ONTs found'}));
+  },
+  async 'olt-restore'(d) {
+    const targets = (await api('/api/devices')).filter(x => x.vendor === 'huawei' && x.role === 'olt' && x.id !== d.id);
+    modal(`<h2>Restore ONTs onto another OLT</h2>
+      <p class="muted">Rebuilds every ONT SatLink has on record for this OLT — serial, port, profiles, VLAN, PPPoE login — onto a replacement, as one change for a second admin to approve. Good for a damaged/dead OLT: the history survives even while it shows offline.</p>
+      <label>Replacement OLT<select id="restore-target">${targets.map(t => `<option value="${val(t.id)}">${esc(t.name)}${t.island_name ? esc(' · ' + t.island_name) : ''}</option>`).join('') || '<option value="">— no other OLT found —</option>'}</select></label>
+      <label>Gemport (same for every restored ONT)<input id="restore-gemport" type="number" value="1" min="0" max="1023"></label>
+      ${btn('Preview', 'olt-restore-preview', {id: d.id}, 'primary')}
+      <div id="restore-preview"></div>`);
+  },
+  async 'olt-restore-preview'(d) {
+    const newId = document.getElementById('restore-target').value;
+    const gemport = document.getElementById('restore-gemport').value || '1';
+    if (!newId) { toast('No replacement OLT to restore onto', true); return; }
+    const r = await api(`/api/olt/${d.id}/restore-preview?${new URLSearchParams({new_olt_id: newId, gemport})}`);
+    document.getElementById('restore-preview').innerHTML =
+      (r.ready.length ? panel(`Will restore (${r.ready.length})`, table(r.ready, [['serial', 'Serial'], ['frame', 'F/S/P', (v, row) => esc(`${row.frame}/${row.slot}/${row.port}`)],
+        ['ont_id', 'New ONT ID'], ['account_number', 'Account']])) : '<p class="s-warning">Nothing is ready to restore.</p>') +
+      (r.skipped.length ? panel(`Skipped (${r.skipped.length})`, table(r.skipped, [['serial', 'Serial'], ['reason', 'Why']])) : '') +
+      (r.ready.length ? btn(`Create change: restore ${r.ready.length} ONTs`, 'olt-restore-create', {id: d.id, new: newId, gemport}, 'primary') : '');
+  },
+  async 'olt-restore-create'(d) {
+    const r = await api(`/api/olt/${d.id}/restore-into/${d.new}`, 'POST', {gemport: Number(d.gemport) || 1});
+    closeModal();
+    toast(`Restore change created: ${r.restored} ONTs${r.skipped.length ? `, ${r.skipped.length} skipped` : ''}`);
+    location.hash = `#/change/${r.change_id}`;
   },
   async 'ont-provision'(d) {
     const devs = (await api('/api/devices')).filter(x => x.vendor === 'huawei' && x.role === 'olt');

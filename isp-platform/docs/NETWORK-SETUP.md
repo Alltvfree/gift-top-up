@@ -94,6 +94,11 @@ Never leave the community as `public`, and allow it only from the platform's add
   ```
   with a rollback (`undo service-port`, `ont delete`). Line/service profiles and the VLAN must already exist on the OLT.
   CLI syntax differs across firmware: run one provisioning by hand, compare, and adjust `app/adapters/huawei.py` if needed.
+* **OLT dead or replaced?** Every ONT ever provisioned through SatLink (serial, port, profiles, VLAN, the linked
+  subscriber) stays on record even while the OLT shows offline. Add the replacement OLT as a device, then on the
+  *old* OLT's device page use **Restore ONTs onto another OLT**: pick the replacement, preview what is and isn't
+  ready (an ONT with no RADIUS password, or no subscriber link, is skipped with a reason, not silently dropped),
+  then create — one change, reviewed and approved like any other, rebuilds every ready ONT on the new hardware.
 
 ## 5. Alerts
 Set `ALERT_WEBHOOK_URL` to any endpoint that accepts `{"text": "..."}` (Slack/Mattermost/Teams, or a small Telegram/Viber bridge).

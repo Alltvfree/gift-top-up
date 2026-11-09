@@ -228,6 +228,104 @@ def provision(olt_id: UUID, body: ProvisionIn, user=Depends(require("network")))
     return {"change_id": change_id, "ont_id": ont_id}
 
 
+# ---------------- bulk restore onto a replacement OLT, from a damaged one's saved history
+class RestoreIn(BaseModel):
+    gemport: int = Field(ge=0, le=1023, default=1)
+    serials: list[str] | None = None  # restrict to these (upper-cased 16-hex); default = every eligible ONT
+
+
+def _restore_plan(conn, new_olt_id, old_olt_id, gemport: int, serials: list[str] | None):
+    """Every ONT SatLink ever provisioned on `old_olt_id`, rebuilt as ont-add + PPPoE + service-port
+    commands for `new_olt_id` (same frame/slot/port; a fresh ont_id assigned on the new OLT so it
+    never collides with whatever is already there). Never raises: an ONT that is missing something
+    (no subscriber link, no RADIUS password, bad serial...) is reported in `skipped`, not fatal to
+    the rest of the batch."""
+    where = ["olt_device_id=%s", "ont_id IS NOT NULL", "serial IS NOT NULL",
+             "line_profile_id IS NOT NULL", "service_profile_id IS NOT NULL", "vlan IS NOT NULL"]
+    params = [old_olt_id]
+    if serials:
+        where.append("serial = ANY(%s)")
+        params.append([s.upper() for s in serials])
+    rows = conn.execute(f"SELECT * FROM onts WHERE {' AND '.join(where)} ORDER BY frame, slot, port, ont_id",
+                        params).fetchall()
+    used_by_port: dict[tuple, set] = {}
+    ready, skipped, apply_lines, rollback_lines = [], [], [], []
+    for o in rows:
+        if not o["subscriber_id"]:
+            skipped.append({"serial": o["serial"], "reason": "No subscriber linked (was never fully re-provisioned, or the link was lost)"})
+            continue
+        sub = conn.execute("SELECT * FROM subscribers WHERE id=%s", (o["subscriber_id"],)).fetchone()
+        if not sub:
+            skipped.append({"serial": o["serial"], "reason": "Linked subscriber no longer exists"})
+            continue
+        pw = conn.execute("SELECT value FROM radcheck WHERE username=%s AND attribute='Cleartext-Password'",
+                          (sub["pppoe_username"],)).fetchone()
+        if not pw:
+            skipped.append({"serial": o["serial"], "reason": f"No RADIUS password for {sub['pppoe_username']}; reset it first"})
+            continue
+        key = (o["frame"], o["slot"], o["port"])
+        if key not in used_by_port:
+            used_by_port[key] = {r["ont_id"] for r in conn.execute(
+                "SELECT ont_id FROM onts WHERE olt_device_id=%s AND frame=%s AND slot=%s AND port=%s AND ont_id IS NOT NULL",
+                (new_olt_id, *key))}
+        ont_id = next((i for i in range(128) if i not in used_by_port[key]), None)
+        if ont_id is None:
+            skipped.append({"serial": o["serial"], "reason": f"No free ONT slot left on port {key[0]}/{key[1]}/{key[2]} of the new OLT"})
+            continue
+        try:
+            a, r = huawei.build_ont_provision(
+                frame=o["frame"], slot=o["slot"], port=o["port"], ont_id=ont_id, serial=o["serial"],
+                line_profile_id=o["line_profile_id"], service_profile_id=o["service_profile_id"], vlan=o["vlan"],
+                gemport=gemport, description=sub["account_number"], pppoe_username=sub["pppoe_username"], pppoe_password=pw["value"])
+        except ValueError as exc:
+            skipped.append({"serial": o["serial"], "reason": str(exc)})
+            continue
+        used_by_port[key].add(ont_id)
+        apply_lines += a
+        rollback_lines += r
+        ready.append({"serial": o["serial"], "frame": o["frame"], "slot": o["slot"], "port": o["port"], "ont_id": ont_id,
+                      "account_number": sub["account_number"], "subscriber_id": str(sub["id"]), "old_ont_row_id": str(o["id"]),
+                      "line_profile_id": o["line_profile_id"], "service_profile_id": o["service_profile_id"], "vlan": o["vlan"]})
+    return ready, skipped, apply_lines, rollback_lines
+
+
+@router.get("/{old_olt_id}/restore-preview")
+def restore_preview(old_olt_id: UUID, new_olt_id: UUID, gemport: int = 1, user=Depends(require("network"))):
+    """What a restore onto `new_olt_id` would do, without changing anything: review before committing."""
+    old, new = _olt(old_olt_id), _olt(new_olt_id)
+    if old["id"] == new["id"]:
+        raise HTTPException(400, "Source and target must be different OLTs")
+    with db.connect() as conn:
+        ready, skipped, _, _ = _restore_plan(conn, new_olt_id, old_olt_id, gemport, None)
+    return {"from": old["name"], "to": new["name"], "ready": ready, "skipped": skipped}
+
+
+@router.post("/{old_olt_id}/restore-into/{new_olt_id}", status_code=201)
+def restore_into(old_olt_id: UUID, new_olt_id: UUID, body: RestoreIn, user=Depends(require("network"))):
+    """Rebuild every ONT SatLink has on record for a damaged/replaced OLT onto its replacement, as
+    one reviewed change. ONTs the plan could not place (see 'skipped') are left for a manual look."""
+    old, new = _olt(old_olt_id), _olt(new_olt_id)
+    if old["id"] == new["id"]:
+        raise HTTPException(400, "Source and target must be different OLTs")
+    with db.connect() as conn:
+        ready, skipped, apply_lines, rollback_lines = _restore_plan(conn, new_olt_id, old_olt_id, body.gemport, body.serials)
+        if not ready:
+            raise HTTPException(400, "Nothing to restore: " + (skipped[0]["reason"] if skipped else f"{old['name']} has no provisioned ONTs on record"))
+        for o in ready:
+            conn.execute(
+                """INSERT INTO onts(olt_device_id,subscriber_id,frame,slot,port,ont_id,serial,description,line_profile_id,service_profile_id,vlan)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (olt_device_id,serial) DO UPDATE SET subscriber_id=EXCLUDED.subscriber_id, frame=EXCLUDED.frame,
+                   slot=EXCLUDED.slot, port=EXCLUDED.port, ont_id=EXCLUDED.ont_id, vlan=EXCLUDED.vlan""",
+                (new_olt_id, o["subscriber_id"], o["frame"], o["slot"], o["port"], o["ont_id"], o["serial"],
+                 o["account_number"], o["line_profile_id"], o["service_profile_id"], o["vlan"]))
+        change_id = create_change(conn, new_olt_id, f"Restore {len(ready)} ONTs onto {new['name']} from {old['name']}",
+                                  "huawei_cli", "\n".join(apply_lines), "\n".join(rollback_lines), user["username"])
+        audit.record(user["username"], "olt.restore", "device", new_olt_id,
+                     {"from": str(old_olt_id), "restored": len(ready), "skipped": len(skipped)}, conn=conn)
+    return {"change_id": change_id, "restored": len(ready), "skipped": skipped}
+
+
 @router.post("/onts/{ont_uuid}/reboot")
 def reboot(ont_uuid: UUID, user=Depends(require("network"))):
     """Restart one ONT now (everyday NOC action, audited; no approval needed)."""
