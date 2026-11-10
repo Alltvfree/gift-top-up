@@ -1,6 +1,8 @@
+import csv
+import io
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from .. import audit, config, db
@@ -99,6 +101,31 @@ def onts(olt_id: UUID | None = None, port: str | None = None, status: str | None
         f"""SELECT o.*, d.name AS olt_name, s.account_number, s.full_name, s.pppoe_username, ({_bucket_sql()}) AS signal
             {base} ORDER BY {SORTS.get(sort, SORTS['port'])} LIMIT %s OFFSET %s""", params + [min(max(limit, 1), 1000), max(offset, 0)])
     return {"total": total, "rows": rows}
+
+
+EXPORT_COLS = ["serial", "frame", "slot", "port", "ont_id", "description", "line_profile_id", "service_profile_id",
+               "vlan", "run_state", "rx_power_dbm", "olt_rx_power_dbm", "last_seen_at", "account_number", "full_name",
+               "pppoe_username", "subscriber_id"]
+
+
+@router.get("/{olt_id}/export")
+def export_onts(olt_id: UUID, user=Depends(require("read"))):
+    """Every ONT SatLink has on record for this OLT, as a CSV -- for a dead OLT's device page, or
+    just to hand a tech a printed sheet. Everything the restore feature itself relies on, visible."""
+    d = _olt(olt_id)
+    rows = db.rows(
+        """SELECT o.*, s.account_number, s.full_name, s.pppoe_username FROM onts o
+           LEFT JOIN subscribers s ON s.id=o.subscriber_id WHERE o.olt_device_id=%s
+           ORDER BY o.frame, o.slot, o.port, o.ont_id""", (olt_id,))
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=EXPORT_COLS, extrasaction="ignore")
+    w.writeheader()
+    for r in rows:
+        w.writerow(r)
+    audit.record(user["username"], "olt.export", "device", olt_id, {"rows": len(rows)})
+    safe_name = "".join(c if c.isalnum() or c in "._-" else "-" for c in d["name"])[:60] or "olt"
+    return Response(buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="{safe_name}-onts.csv"'})
 
 
 def _ont(ont_uuid):

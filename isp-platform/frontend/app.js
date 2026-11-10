@@ -257,13 +257,14 @@ const PAGES = {
       ['huawei', 'ubiquiti'].includes(d.vendor) && d.parent_name ? ((d.settings || {}).via_router ? btn('Connect directly', 'olt-access', {id, via: ''})
         : btn(`Reach through ${d.parent_name}`, 'olt-access', {id, via: '1', router: d.parent_name})) : '',
       can('approve') ? btn('Delete', 'device-del', {id}, 'danger') : ''].join('') : '';
+    const exportBtn = d.vendor === 'huawei' && d.role === 'olt' ? `<a class="btn small" href="/api/olt/${val(id)}/export" download>Download ONT list (CSV)</a>` : '';
     const m = d.metrics[0] || {};
     return panel(`${d.name}`, `<div class="cards">
         <div class="card"><div class="label">Status</div><div class="value">${tag(d.status)}</div><div class="note">seen ${ago(d.last_seen_at)}</div></div>
         <div class="card"><div class="label">Latency / loss</div><div class="value v-lg">${esc(m.latency_ms)} ms</div><div class="note">${esc(m.packet_loss_pct)}% loss</div></div>
         <div class="card"><div class="label">CPU / memory</div><div class="value v-lg">${esc(m.cpu_load_pct)}%</div><div class="note">${esc(m.mem_used_pct)}% memory</div></div>
         <div class="card"><div class="label">Identity</div><div class="value v-sm">${esc(d.vendor)} · ${esc(d.role)}</div><div class="note">${esc(d.management_ip)}${(d.settings || {}).via_router ? esc(` via ${d.parent_name || 'router'} ${d.settings.forward_host}:${d.settings.forward_port}`) : ''} · ${esc(d.model)} ${esc(d.software_version)} · creds ${d.has_credentials ? 'stored' : 'missing'}</div></div>
-      </div>${d.last_poll_error ? `<div class="error">Last poll: ${esc(d.last_poll_error)}</div>` : ''}${pinOffer(d)}${m.extra ? `<pre>${esc(JSON.stringify(m.extra, null, 1))}</pre>` : ''}`, acts) +
+      </div>${d.last_poll_error ? `<div class="error">Last poll: ${esc(d.last_poll_error)}</div>` : ''}${pinOffer(d)}${m.extra ? `<pre>${esc(JSON.stringify(m.extra, null, 1))}</pre>` : ''}`, acts + exportBtn) +
       panel('Recent polls', table(d.metrics.slice(0, 30), [['at', 'When', dt], ['reachable', 'Up', v => v ? '<span class="s-ok">yes</span>' : '<span class="s-critical">no</span>'],
         ['latency_ms', 'Latency ms'], ['packet_loss_pct', 'Loss %'], ['cpu_load_pct', 'CPU %'], ['mem_used_pct', 'Mem %'], ['extra', 'PPPoE', v => esc(v && v.pppoe_active)]], {empty: 'Not polled yet'})) +
       panel('Alerts', table(d.alerts, [['severity', 'Sev', tag], ['kind', 'Kind'], ['message', 'Message'], ['opened_at', 'Opened', dt], ['resolved_at', 'Resolved', dt]], {empty: 'No alerts'})) +
@@ -328,7 +329,8 @@ const PAGES = {
       ['id', 'Actions', (oid, r) => [btn('Signal', 'ont-signal', {id: oid}), net ? btn('Config', 'ont-config', {id: oid, name: r.description || r.serial}) : '',
         net && r.run_state === 'online' ? btn('Reboot', 'ont-reboot', {id: oid, name: r.description || r.serial}) : '',
         net ? btn(r.control === 'deactivated' ? 'Enable' : 'Disable', 'ont-state', {id: oid, active: r.control === 'deactivated' ? '1' : '', name: r.description || r.serial}, r.control === 'deactivated' ? '' : 'danger') : ''].join(' ')]],
-      {empty: 'No ONTs match. The list fills after the first OLT poll.'}) + pager, '', `${list.total} ONTs`);
+      {empty: 'No ONTs match. The list fills after the first OLT poll.'}) + pager,
+      `<a class="btn small" href="/api/olt/${val(id)}/export" download>Download CSV</a>`, `${list.total} ONTs`);
   }},
 
   threats: {title: 'Threat protection', group: 'INFRASTRUCTURE', nav: '⛔ Threat protection', perm: 'read', async render(q) {

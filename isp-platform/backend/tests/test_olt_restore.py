@@ -159,3 +159,36 @@ def test_gemport_is_honoured(admin, two_olts):
     r = admin.post(f"/api/olt/{old_id}/restore-into/{new_id}", json={"gemport": 42})
     plan = admin.get(f"/api/changes/{r.json()['change_id']}").json()["plan"]
     assert "gemport 42" in plan
+
+
+def test_export_csv(admin, two_olts, sql):
+    old_id, new_id = two_olts
+    sub = mk_subscriber(admin, "csv1")
+    provision(admin, old_id, sub, port=1)
+    sql("""INSERT INTO onts(olt_device_id,frame,slot,port,ont_id,serial,description,line_profile_id,service_profile_id,vlan)
+          VALUES (%s,0,2,4,9,'4857544100000AAA','Unlinked ONT',11,22,200)""", (old_id,))
+
+    r = admin.get(f"/api/olt/{old_id}/export")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
+    assert "attachment" in r.headers["content-disposition"] and "OLD-OLT-onts.csv" in r.headers["content-disposition"]
+    body = r.text
+    assert "serial,frame,slot,port,ont_id,description,line_profile_id" in body.splitlines()[0]
+    assert serial_for(sub["pppoe_username"]) in body and sub["account_number"] in body
+    assert "4857544100000AAA" in body and "Unlinked ONT" in body
+
+    import csv
+    import io
+    rows = list(csv.DictReader(io.StringIO(body)))
+    assert len(rows) == 2
+    linked = next(x for x in rows if x["serial"] == serial_for(sub["pppoe_username"]))
+    assert linked["line_profile_id"] == "10" and linked["vlan"] == "100" and linked["account_number"] == sub["account_number"]
+
+    # does not leak into a different OLT's export, and 404s on a non-OLT / missing device
+    other = admin.get(f"/api/olt/{new_id}/export").text
+    assert serial_for(sub["pppoe_username"]) not in other
+    mt = admin.post("/api/devices", json={"name": "NOT-OLT2", "vendor": "mikrotik", "role": "island_router"}).json()["id"]
+    assert admin.get(f"/api/olt/{mt}/export").status_code == 404
+
+    from .conftest import login
+    sam = login("sam")  # support: read-only, but export only needs 'read'
+    assert sam.get(f"/api/olt/{old_id}/export").status_code == 200
