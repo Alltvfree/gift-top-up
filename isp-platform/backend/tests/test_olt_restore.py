@@ -192,3 +192,43 @@ def test_export_csv(admin, two_olts, sql):
     from .conftest import login
     sam = login("sam")  # support: read-only, but export only needs 'read'
     assert sam.get(f"/api/olt/{old_id}/export").status_code == 200
+
+
+def test_bind_endpoint_no_pppoe_no_subscriber_required(admin, sql):
+    olt_id = mk_olt(admin, "BIND-OLT")
+    r = admin.post(f"/api/olt/{olt_id}/bind", json={
+        "description": "MD ALEEM", "serial": "4857544302C308A8",
+        "frame": 0, "slot": 1, "port": 4, "line_profile_id": 10, "service_profile_id": 10, "vlan": 100})
+    assert r.status_code == 201, r.text
+    cid = r.json()["change_id"]
+    ch = admin.get(f"/api/changes/{cid}").json()
+    assert ch["kind"] == "huawei_cli" and "Bind ONT" in ch["title"] and "MD ALEEM" in ch["title"]
+    assert 'sn-auth "4857544302C308A8"' in ch["plan"] and 'desc "MD ALEEM"' in ch["plan"]
+    assert "pppoe" not in ch["plan"].lower() and "user-account" not in ch["plan"].lower()
+    row = sql("SELECT description, subscriber_id, ont_id FROM onts WHERE olt_device_id=%s AND serial=%s", (olt_id, "4857544302C308A8"))[0]
+    assert row[0] == "MD ALEEM" and row[1] is None and row[2] == r.json()["ont_id"]
+
+
+def test_bind_ont_id_auto_assign_and_subscriber_optional_link(admin, sql):
+    olt_id = mk_olt(admin, "BIND-OLT2")
+    sub = mk_subscriber(admin, "bindlink")
+    admin.post(f"/api/olt/{olt_id}/bind", json={
+        "description": "existing", "serial": "4857544000000001",
+        "frame": 0, "slot": 1, "port": 4, "ont_id": 0, "line_profile_id": 10, "service_profile_id": 10, "vlan": 100})
+    r = admin.post(f"/api/olt/{olt_id}/bind", json={
+        "description": "second", "serial": "4857544000000002", "subscriber_id": sub["id"],
+        "frame": 0, "slot": 1, "port": 4, "line_profile_id": 10, "service_profile_id": 10, "vlan": 100})
+    assert r.status_code == 201 and r.json()["ont_id"] != 0  # auto-assigned, avoids the one just taken
+    row = sql("SELECT subscriber_id FROM onts WHERE olt_device_id=%s AND serial=%s", (olt_id, "4857544000000002"))[0]
+    assert str(row[0]) == sub["id"]
+
+
+def test_bind_bad_serial_and_unknown_subscriber_rejected(admin):
+    olt_id = mk_olt(admin, "BIND-OLT3")
+    assert admin.post(f"/api/olt/{olt_id}/bind", json={
+        "description": "x", "serial": "not-hex", "frame": 0, "slot": 1, "port": 0,
+        "line_profile_id": 10, "service_profile_id": 10, "vlan": 100}).status_code == 422
+    import uuid
+    assert admin.post(f"/api/olt/{olt_id}/bind", json={
+        "description": "x", "serial": "4857544000000099", "subscriber_id": str(uuid.uuid4()),
+        "frame": 0, "slot": 1, "port": 0, "line_profile_id": 10, "service_profile_id": 10, "vlan": 100}).status_code == 404

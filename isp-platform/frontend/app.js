@@ -689,7 +689,8 @@ const ACTIONS = {
     toast('Asking OLT for unregistered ONTs…');
     const rows = await api(`/api/olt/${d.id}/autofind`);
     modal('<h2>Unregistered ONTs (autofind)</h2>' + table(rows, [['frame', 'F/S/P', (v, r) => esc(`${r.frame}/${r.slot}/${r.port}`)], ['serial', 'Serial'], ['equipment_id', 'Model'], ['found_at', 'Found'],
-      ['serial', '', (v, r) => btn('Provision', 'ont-provision', {olt: d.id, serial: r.serial, frame: r.frame, slot: r.slot, port: r.port}, 'primary')]], {empty: 'No new ONTs found'}));
+      ['serial', '', (v, r) => btn('Provision', 'ont-provision', {olt: d.id, serial: r.serial, frame: r.frame, slot: r.slot, port: r.port}, 'primary') +
+        btn('Bind (no PPPoE)', 'ont-bind', {olt: d.id, serial: r.serial, frame: r.frame, slot: r.slot, port: r.port})]], {empty: 'No new ONTs found'}));
   },
   async 'olt-restore'(d) {
     const targets = (await api('/api/devices')).filter(x => x.vendor === 'huawei' && x.role === 'olt' && x.id !== d.id);
@@ -724,6 +725,17 @@ const ACTIONS = {
       form('provision', fields([
         ['olt_id', 'OLT', 'select', {options: devs.map(x => [x.id, x.name]), default: d.olt}],
         ['subscriber_id', 'Subscriber', 'select', {options: subs.map(s => [s.id, `${s.account_number} · ${s.full_name} · ${s.pppoe_username}`]), default: d.sub}],
+        ['serial', 'ONT serial (16 hex)', 'text', {required: true, default: d.serial}],
+        ['frame', 'Frame', 'number', {default: d.frame ?? 0}], ['slot', 'Slot', 'number', {required: true, default: d.slot}], ['port', 'PON port', 'number', {required: true, default: d.port}],
+        ['ont_id', 'ONT ID (blank = next free)', 'number'], ['line_profile_id', 'ont-lineprofile-id', 'number', {required: true}],
+        ['service_profile_id', 'ont-srvprofile-id', 'number', {required: true}], ['vlan', 'Service VLAN', 'number', {required: true}], ['gemport', 'GEM port', 'number', {default: 1}]]), 'Create change request'));
+  },
+  async 'ont-bind'(d) {
+    const devs = (await api('/api/devices')).filter(x => x.vendor === 'huawei' && x.role === 'olt');
+    modal('<h2>Bind ONT</h2><p class="muted">OLT-side registration only (ont add + service-port) -- does NOT push PPPoE/WAN to the ONT. Use this for a customer whose own router already dials PPPoE, or an ONT found by autofind that has no SatLink subscriber yet. Line/service profiles and VLAN must already exist on the OLT.</p>' +
+      form('bind', fields([
+        ['olt_id', 'OLT', 'select', {options: devs.map(x => [x.id, x.name]), default: d.olt}],
+        ['description', 'Description (house/account name)', 'text', {required: true}],
         ['serial', 'ONT serial (16 hex)', 'text', {required: true, default: d.serial}],
         ['frame', 'Frame', 'number', {default: d.frame ?? 0}], ['slot', 'Slot', 'number', {required: true, default: d.slot}], ['port', 'PON port', 'number', {required: true, default: d.port}],
         ['ont_id', 'ONT ID (blank = next free)', 'number'], ['line_profile_id', 'ont-lineprofile-id', 'number', {required: true}],
@@ -833,6 +845,10 @@ const FORMS = {
   async provision(data) {
     const {olt_id, ...body} = data;
     const r = await api(`/api/olt/${olt_id}/provision`, 'POST', body); closeModal(); location.hash = `#/change/${r.change_id}`;
+  },
+  async bind(data) {
+    const {olt_id, ...body} = data;
+    const r = await api(`/api/olt/${olt_id}/bind`, 'POST', body); closeModal(); location.hash = `#/change/${r.change_id}`;
   },
   async change(data) { const r = await api('/api/changes', 'POST', data); closeModal(); location.hash = `#/change/${r.id}`; },
   async firewall(data) {

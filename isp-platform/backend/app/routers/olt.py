@@ -255,6 +255,54 @@ def provision(olt_id: UUID, body: ProvisionIn, user=Depends(require("network")))
     return {"change_id": change_id, "ont_id": ont_id}
 
 
+class BindIn(BaseModel):
+    serial: str = Field(pattern=r"^[0-9A-Fa-f]{16}$")
+    description: str = Field(max_length=64)
+    frame: int = Field(ge=0, le=7, default=0)
+    slot: int = Field(ge=0, le=21)
+    port: int = Field(ge=0, le=15)
+    ont_id: int | None = Field(default=None, ge=0, le=127)
+    line_profile_id: int = Field(ge=0, le=8192)
+    service_profile_id: int = Field(ge=0, le=8192)
+    vlan: int = Field(ge=1, le=4094)
+    gemport: int = Field(ge=0, le=1023, default=1)
+    subscriber_id: UUID | None = None
+
+
+@router.post("/{olt_id}/bind", status_code=201)
+def bind(olt_id: UUID, body: BindIn, user=Depends(require("network"))):
+    """OLT-side registration only (ont add + service-port) -- no PPPoE/WAN push to the ONT. For an
+    ONT whose own customer router already dials PPPoE, or one found by autofind that isn't (yet)
+    linked to a SatLink subscriber record: a free-text description instead of picking one."""
+    _olt(olt_id)
+    with db.connect() as conn:
+        if body.subscriber_id and not conn.execute("SELECT 1 FROM subscribers WHERE id=%s", (body.subscriber_id,)).fetchone():
+            raise HTTPException(404, "Subscriber not found")
+        ont_id = body.ont_id
+        if ont_id is None:
+            used = {r["ont_id"] for r in conn.execute(
+                "SELECT ont_id FROM onts WHERE olt_device_id=%s AND frame=%s AND slot=%s AND port=%s AND ont_id IS NOT NULL",
+                (olt_id, body.frame, body.slot, body.port))}
+            ont_id = next(i for i in range(128) if i not in used)
+        try:
+            apply_lines, rollback = huawei.build_ont_bind(
+                frame=body.frame, slot=body.slot, port=body.port, ont_id=ont_id, serial=body.serial,
+                line_profile_id=body.line_profile_id, service_profile_id=body.service_profile_id,
+                vlan=body.vlan, gemport=body.gemport, description=body.description)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        conn.execute(
+            """INSERT INTO onts(olt_device_id,subscriber_id,frame,slot,port,ont_id,serial,description,line_profile_id,service_profile_id,vlan)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               ON CONFLICT (olt_device_id,serial) DO UPDATE SET subscriber_id=EXCLUDED.subscriber_id, frame=EXCLUDED.frame,
+               slot=EXCLUDED.slot, port=EXCLUDED.port, ont_id=EXCLUDED.ont_id, description=EXCLUDED.description, vlan=EXCLUDED.vlan""",
+            (olt_id, body.subscriber_id, body.frame, body.slot, body.port, ont_id, body.serial.upper(),
+             body.description, body.line_profile_id, body.service_profile_id, body.vlan))
+        change_id = create_change(conn, olt_id, f"Bind ONT {body.serial.upper()} ({body.description})",
+                                  "huawei_cli", "\n".join(apply_lines), "\n".join(rollback), user["username"])
+    return {"change_id": change_id, "ont_id": ont_id}
+
+
 # ---------------- bulk restore onto a replacement OLT, from a damaged one's saved history
 class RestoreIn(BaseModel):
     gemport: int = Field(ge=0, le=1023, default=1)
