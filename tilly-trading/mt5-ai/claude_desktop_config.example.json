@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "mt5": {
+      "command": "C:\\kronos-foundation\\venv\\Scripts\\python.exe",
+      "args": ["-m", "mt5_ai"],
+      "env": {
+        "PYTHONPATH": "C:\\mt5-ai",
+        "MT5_AI_SYMBOLS": "XAUUSD*",
+        "MT5_AI_MAX_RISK_PCT": "1.0",
+        "MT5_AI_KRONOS_REPO": "C:\\kronos-foundation\\Kronos-master",
+        "MT5_AI_KRONOS_DIR": "C:\\tilly-kronos"
+      }
+    }
+  }
+}

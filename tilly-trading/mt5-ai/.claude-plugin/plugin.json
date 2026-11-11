@@ -1,0 +1,6 @@
+{
+  "name": "mt5-ai",
+  "description": "Claude trading assistant for MetaTrader 5: Kronos forecasts, a tested rule-based gold setup, risk-sized single-use order tickets, demo-only by default.",
+  "version": "0.1.0",
+  "license": "MIT"
+}

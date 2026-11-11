@@ -1,0 +1,7 @@
+# The MCP server itself. Pinned below 2.0: the server uses FastMCP, renamed in mcp 2.x.
+mcp>=1.2,<2
+MetaTrader5>=5.0.45
+pandas>=2.0
+numpy>=1.26
+# Kronos (optional, for kronos_forecast) needs torch, einops, huggingface_hub, safetensors:
+# install them from shiyu-coder/Kronos' own requirements.txt into the SAME environment.
