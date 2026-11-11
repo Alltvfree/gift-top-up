@@ -449,3 +449,19 @@ features at all (a feature that's zero for 99% of history would look like
 "usually neutral," not "not covered yet," which would be misleading, not
 just premature). It's wired into `train.py --news-store` and
 `infer.py --news-store` for once real history has accumulated.
+
+## Setup library + comparison (`setups/library.py`, `backtest/compare_setups.py`)
+
+Candidate strategies transcribed from third-party material (Mayfair RSI scalper,
+DTC EMA ribbon, an SMC liquidity-sweep course), reduced to fixed rules and
+scored with the same simulator, costs, risk limits and 500-trade verdict gate as
+the trend-pullback setup. Also tests "agreement" combinations and a time-shifted
+null per row.
+
+```
+python -m backtest.compare_setups --config config/setup_xauusd.toml --symbol XAUUSD
+```
+
+Rules are fixed from the sources, not tuned. Order blocks / FVG / volumetric
+metrics are not transcribed (drawing tools with many free parameters). A combined
+signal should only be built from rows that show a demonstrated edge here.
