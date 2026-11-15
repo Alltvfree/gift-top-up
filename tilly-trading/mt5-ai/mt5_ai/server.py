@@ -7,6 +7,7 @@ close_position are marked destructive and should be left on "Needs approval".
 from __future__ import annotations
 
 import os
+import sys
 from functools import partial
 
 import anyio
@@ -137,7 +138,10 @@ def main() -> None:
     if settings.kronos_dir:
         from .setup_adapter import TrendPullbackAdapter
 
-        setup = TrendPullbackAdapter(settings.kronos_dir)
+        try:
+            setup = TrendPullbackAdapter(settings.kronos_dir)
+        except FileNotFoundError as exc:  # optional piece: don't take the whole server down
+            print(f"mt5-ai: rule setup disabled ({exc})", file=sys.stderr)
 
     build_server(Mt5Service(broker, settings, forecaster=forecaster, setup=setup)).run()
 
