@@ -23,3 +23,8 @@ description: >-
   and why, and what to look at next. Be straight about losses; do not rationalize them.
 - Watch the person's behavior too: revenge trading after a loss, widening stops, oversizing,
   trading outside the plan. Name it kindly and point back to the limits.
+
+
+## Journal review
+
+Call `journal_review` to see how placed trades actually ended, in R, overall and by tag. Report its `reading` fields as written: with fewer than 30 closed trades it says "too few", and you must not call any tag or setup "working" on that basis. Remind the person that with many tags, one will look good by chance.

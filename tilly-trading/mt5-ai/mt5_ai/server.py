@@ -74,6 +74,11 @@ def build_server(service: Mt5Service) -> FastMCP:
         """Today's realized P&L across every strategy on the account, trades used, and how much loss budget is left."""
         return await run(service.todays_summary, symbol)
 
+    @mcp.tool(annotations=_READ)
+    async def journal_review(days: int = 120) -> dict:
+        """The trade journal: how the trades this server placed actually ended, in R (profit over money risked), overall and by tag, with confidence ranges and a plain reading. Says 'too few trades' until there are 30+ closed trades."""
+        return await run(service.journal_review, days)
+
     @mcp.tool(annotations=_COMPUTE)
     async def kronos_forecast(symbol: str, timeframe: str = "M15", lookback: int = 400, horizon_bars: int = 16, samples: int = 5) -> dict:
         """Forecast the next `horizon_bars` candles with the Kronos foundation model on live closed candles. Runs `samples` independent sampled paths and reports the share ending higher. Takes roughly 5 seconds per sample on CPU. An unverified signal, not a prediction."""
@@ -90,9 +95,9 @@ def build_server(service: Mt5Service) -> FastMCP:
         return await run(service.simulate_trade_plan, symbol, side, sl, tp, timeframe, horizon_bars, simulations, history_bars)
 
     @mcp.tool(annotations=_PREPARE)
-    async def prepare_trade(symbol: str, side: str, sl: float, tp: float, risk_pct: float | None = None, note: str = "") -> dict:
-        """Size a trade from the stop distance, run every risk rule and the broker pre-flight, and return PASS with a single-use ticket or BLOCK with every reason. Sends NO order. side is BUY or SELL; sl and tp are absolute prices; risk_pct defaults to the configured maximum."""
-        return await run(service.prepare_trade, symbol, side, sl, tp, risk_pct, note)
+    async def prepare_trade(symbol: str, side: str, sl: float, tp: float, risk_pct: float | None = None, note: str = "", tags: str = "") -> dict:
+        """Size a trade from the stop distance, run every risk rule and the broker pre-flight, and return PASS with a single-use ticket or BLOCK with every reason. Sends NO order. side is BUY or SELL; sl and tp are absolute prices; risk_pct defaults to the configured maximum. tags is an optional comma-separated label set for the journal (e.g. setup:sweep,session:london) so results can be reviewed by tag later."""
+        return await run(service.prepare_trade, symbol, side, sl, tp, risk_pct, note, tags)
 
     @mcp.tool(annotations=_ORDER)
     async def place_prepared_trade(ticket_id: str) -> dict:

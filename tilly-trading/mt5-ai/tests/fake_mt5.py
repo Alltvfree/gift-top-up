@@ -97,9 +97,9 @@ class FakeMT5:
     def history_deals_get(self, start, end):
         return tuple(self.deals)
 
-    def add_deal(self, *, entry, profit=0.0, magic=0, seconds_ago=60, dtype=0, commission=0.0):
+    def add_deal(self, *, entry, profit=0.0, magic=0, seconds_ago=60, dtype=0, commission=0.0, position_id=0):
         self.deals.append(NS(time=self.now - seconds_ago, type=dtype, entry=entry, profit=profit, commission=commission,
-                             swap=0.0, fee=0.0, magic=magic))
+                             swap=0.0, fee=0.0, magic=magic, position_id=position_id))
 
     def add_position(self, *, side="BUY", volume=0.19, price_open=5000.0, sl=4995.0, tp=5010.0, magic=26110001):
         p = NS(ticket=next(self._tickets), symbol=self.symbol_name, type=self.POSITION_TYPE_BUY if side == "BUY" else self.POSITION_TYPE_SELL,

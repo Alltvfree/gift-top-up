@@ -48,6 +48,7 @@ class Mt5Service:
         self.tickets = TicketStore(settings.ticket_ttl_seconds, clock)
         self._log_path = Path(settings.state_dir) / "trades.jsonl"
         self.halt_file = Path(settings.state_dir) / "HALT"
+        self._tags: dict[str, str] = {}
 
     # --- audit log ----------------------------------------------------------
     def _log(self, event: str, **data) -> None:
@@ -158,7 +159,7 @@ class Mt5Service:
         ours_open = sum(1 for p in self.broker.positions() if p["magic"] == self.s.magic)
         return AccountContext(account["is_demo"], account["balance"], account["equity"], t["realized"], t["trades_ours"], ours_open)
 
-    def prepare_trade(self, symbol: str, side: str, sl: float, tp: float, risk_pct: float | None = None, note: str = "") -> dict:
+    def prepare_trade(self, symbol: str, side: str, sl: float, tp: float, risk_pct: float | None = None, note: str = "", tags: str = "") -> dict:
         if self.halted():
             return {"verdict": "BLOCK", "reasons": [self._HALT_MSG.format(path=self.halt_file)], "checks": []}
         side = side.upper()
@@ -178,7 +179,9 @@ class Mt5Service:
             return {"verdict": "BLOCK", "reasons": [c.detail for c in ev.failures], "checks": _checks(ev.checks)}
         t = self.tickets.issue(symbol=spec.symbol, side=side, lots=ev.lots, sl=sl, tp=tp, ref_price=entry,
                                risk_pct=risk_pct, risk_money=ev.risk_money, rr=ev.rr, note=note)
-        self._log("prepared", ticket=t.id, fingerprint=t.fingerprint, symbol=t.symbol, side=side, lots=t.lots, sl=sl, tp=tp, note=note)
+        self._tags[t.id] = tags
+        self._log("prepared", ticket=t.id, fingerprint=t.fingerprint, symbol=t.symbol, side=side, lots=t.lots, sl=sl, tp=tp,
+                  note=note, tags=tags, risk_money=round(ev.risk_money, 2), rr=round(ev.rr, 2))
         return {"verdict": "PASS", "ticket_id": t.id, "fingerprint": t.fingerprint, "expires_in_seconds": self.s.ticket_ttl_seconds,
                 "ticket": self.tickets.describe(t, spec.digits), "checks": _checks(ev.checks),
                 "next": "Show the person this ticket. Only if they reply with an explicit yes for THIS ticket, call place_prepared_trade."}
@@ -212,12 +215,21 @@ class Mt5Service:
         if not pre["ok"]:
             return refuse(f"Broker pre-flight refused: {pre['comment']} (retcode {pre['retcode']}).")
         res = self.broker.send(req)
-        self._log("placed" if res["ok"] else "failed", ticket=t.id, fingerprint=t.fingerprint, **res)
+        self._log("placed" if res["ok"] else "failed", ticket=t.id, fingerprint=t.fingerprint, tags=self._tags.pop(t.id, ""),
+                  risk_money=round(t.risk_money, 2), **res)
         if not res["ok"]:
             return {"placed": False, "ticket": t.id, "error": f"Broker rejected the order: {res['comment']} (retcode {res['retcode']}).",
                     "note": "The ticket is spent. Do not retry without a new check and a new yes."}
         return {"placed": True, "ticket": t.id, "side": t.side, "symbol": t.symbol, "lots": res["volume"], "fill_price": res["price"],
                 "stop_loss": t.sl, "take_profit": t.tp, "position_ticket": res["order"], "max_loss_at_stop": round(t.risk_money, 2)}
+
+    def journal_review(self, days: int = 120) -> dict:
+        """How the trades this server placed actually ended, in R, overall and by tag."""
+        from .journal import placed_trades, read_events, review
+
+        trades = placed_trades(read_events(self._log_path))
+        outcomes = self.broker.position_outcomes([t["position"] for t in trades if t["position"]], days)
+        return review(trades, outcomes)
 
     # --- managing what this server opened ------------------------------------
     def _ours(self, position_ticket: int) -> dict:

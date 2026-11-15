@@ -28,3 +28,8 @@ Stop and target are set BEFORE the entry, never after.
    The ticket expires in minutes and can be used once.
 
 Never size by feel, never raise `risk_pct` above what the person set, never add to a loser.
+
+
+## Tag every plan for the journal
+
+When you call `prepare_trade`, pass `tags` as a short comma-separated label set describing WHY, e.g. `setup:liquidity-sweep,session:london,trend:up`. Use the same labels every time you take the same kind of trade; the journal groups results by tag. Do not invent tags to make a trade sound better.

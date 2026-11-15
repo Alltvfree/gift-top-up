@@ -168,6 +168,25 @@ class Mt5Broker:
                 ours += 1
         return {"realized": realized, "trades_ours": ours, "server_day": str(midnight.date())}
 
+    def position_outcomes(self, position_ids: list[int], days: int = 120) -> dict:
+        """Net result and closed-flag per position id, from the broker's deal history."""
+        if not position_ids:
+            return {}
+        with self._lock:
+            now = pd.Timestamp.now(tz="UTC").tz_localize(None)
+            deals = self.mt5.history_deals_get((now - pd.Timedelta(days=days)).to_pydatetime(), (now + pd.Timedelta(days=3)).to_pydatetime()) or ()
+        wanted = {int(i) for i in position_ids}
+        out: dict[int, dict] = {}
+        for d in deals:
+            pid = int(getattr(d, "position_id", 0) or 0)
+            if pid not in wanted or d.type not in (self.mt5.DEAL_TYPE_BUY, self.mt5.DEAL_TYPE_SELL):
+                continue
+            o = out.setdefault(pid, {"net": 0.0, "closed": False})
+            o["net"] += float(d.profit) + float(d.commission) + float(d.swap) + float(getattr(d, "fee", 0.0))
+            if d.entry in (self.mt5.DEAL_ENTRY_OUT, self.mt5.DEAL_ENTRY_INOUT, self.mt5.DEAL_ENTRY_OUT_BY):
+                o["closed"] = True
+        return out
+
     # --- requests -----------------------------------------------------------
     def market_request(self, *, symbol, side, lots, sl, tp, price, deviation, magic, comment) -> dict:
         m = self.mt5
