@@ -298,3 +298,59 @@ def test_halting_does_not_stop_closing_or_tightening_open_positions(mt5, tmp_pat
     p = mt5.add_position(side="BUY", sl=4995.0)
     svc.halt_trading()
     assert svc.move_stop(p.ticket, 4999.0)["moved"] and svc.close_position(p.ticket)["closed"]
+
+
+# --- risk must fit inside what is left of today's loss budget --------------------
+def test_a_trade_that_could_breach_the_daily_loss_limit_is_blocked(mt5, tmp_path):
+    svc = make(mt5, tmp_path, max_risk_pct=5.0, max_daily_loss_pct=3.0, max_lot=100.0)
+    out = prepare(svc, risk_pct=5.0)
+    assert out["verdict"] == "BLOCK"
+    assert any(c["name"] == "risk_within_daily_budget" and not c["passed"] for c in out["checks"])
+
+
+# --- exit timer ---------------------------------------------------------------------
+def test_timed_exit_closes_after_the_deadline_only(mt5, tmp_path):
+    svc = make(mt5, tmp_path)
+    p = prepare(svc, max_hold_seconds=60)
+    assert p["verdict"] == "PASS"
+    placed = svc.place_prepared_trade(p["ticket_id"])
+    assert placed["placed"] and "timed_exit" in placed
+    pos = placed["position_ticket"]
+    svc.clock["t"] += 30
+    assert svc.run_expiries() == [] and any(x.ticket == pos for x in mt5.positions)
+    svc.clock["t"] += 31
+    assert svc.run_expiries() == [pos]
+    assert not any(x.ticket == pos for x in mt5.positions)
+    assert svc._expiries == {}
+
+
+def test_timer_drops_quietly_if_the_stop_or_target_already_closed_it(mt5, tmp_path):
+    svc = make(mt5, tmp_path)
+    p = prepare(svc, max_hold_seconds=60)
+    placed = svc.place_prepared_trade(p["ticket_id"])
+    mt5.positions = []                      # stop hit
+    svc.clock["t"] += 120
+    sent_before = len(mt5.sent)
+    assert svc.run_expiries() == [] and len(mt5.sent) == sent_before and svc._expiries == {}
+
+
+def test_timer_never_touches_a_position_this_server_did_not_open(mt5, tmp_path):
+    svc = make(mt5, tmp_path)
+    foreign = mt5.add_position(magic=999)
+    svc._schedule_exit(foreign.ticket, 1)
+    svc.clock["t"] += 10
+    sent_before = len(mt5.sent)
+    assert svc.run_expiries() == [] and len(mt5.sent) == sent_before
+
+
+def test_timers_survive_a_restart(mt5, tmp_path):
+    svc = make(mt5, tmp_path)
+    p = prepare(svc, max_hold_seconds=600)
+    placed = svc.place_prepared_trade(p["ticket_id"])
+    again = make(mt5, tmp_path)
+    assert placed["position_ticket"] in again._expiries
+
+
+def test_hold_time_out_of_range_is_refused(mt5, tmp_path):
+    out = prepare(make(mt5, tmp_path), max_hold_seconds=99999)
+    assert out["verdict"] == "BLOCK"

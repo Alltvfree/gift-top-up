@@ -156,6 +156,10 @@ def evaluate_order(
     add("daily_loss", -account.realized_today < loss_limit,
         f"Realized today {account.realized_today:+.2f} vs a daily loss limit of -{loss_limit:.2f} "
         f"({settings.max_daily_loss_pct:g}%). Includes every strategy on the account.")
+    remaining = max(loss_limit + account.realized_today, 0.0)
+    add("risk_within_daily_budget", ev.risk_money <= remaining + 1e-9,
+        f"This trade risks {ev.risk_money:.2f}; {remaining:.2f} is left of today's loss budget. "
+        "A single stop-out must not be able to take the day past its limit.")
     add("trades_today", account.trades_today_ours < settings.max_trades_per_day,
         f"{account.trades_today_ours} of {settings.max_trades_per_day} trades used today.")
     add("open_positions", account.open_positions_ours < settings.max_open_positions,

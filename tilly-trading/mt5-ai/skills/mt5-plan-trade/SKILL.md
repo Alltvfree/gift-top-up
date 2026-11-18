@@ -33,3 +33,7 @@ Never size by feel, never raise `risk_pct` above what the person set, never add 
 ## Tag every plan for the journal
 
 When you call `prepare_trade`, pass `tags` as a short comma-separated label set describing WHY, e.g. `setup:liquidity-sweep,session:london,trend:up`. Use the same labels every time you take the same kind of trade; the journal groups results by tag. Do not invent tags to make a trade sound better.
+
+## Fast in-and-out trades
+
+For a quick scalp, read M1/M5 candles (`get_candles` with `timeframe` M1), keep the stop at least 5x the spread (the server blocks a spread above 20% of the stop), and pass `max_hold_seconds` to `prepare_trade` (e.g. 60-300) so the server closes the position at market when time is up if the stop/target have not hit. Tag it `style:scalp` so the journal keeps scalps separate. The timer only runs while Claude Desktop is open; the broker-side stop and target always remain.

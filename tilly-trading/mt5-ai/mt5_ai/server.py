@@ -95,9 +95,9 @@ def build_server(service: Mt5Service) -> FastMCP:
         return await run(service.simulate_trade_plan, symbol, side, sl, tp, timeframe, horizon_bars, simulations, history_bars)
 
     @mcp.tool(annotations=_PREPARE)
-    async def prepare_trade(symbol: str, side: str, sl: float, tp: float, risk_pct: float | None = None, note: str = "", tags: str = "") -> dict:
-        """Size a trade from the stop distance, run every risk rule and the broker pre-flight, and return PASS with a single-use ticket or BLOCK with every reason. Sends NO order. side is BUY or SELL; sl and tp are absolute prices; risk_pct defaults to the configured maximum. tags is an optional comma-separated label set for the journal (e.g. setup:sweep,session:london) so results can be reviewed by tag later."""
-        return await run(service.prepare_trade, symbol, side, sl, tp, risk_pct, note, tags)
+    async def prepare_trade(symbol: str, side: str, sl: float, tp: float, risk_pct: float | None = None, note: str = "", tags: str = "", max_hold_seconds: int = 0) -> dict:
+        """Size a trade from the stop distance, run every risk rule and the broker pre-flight, and return PASS with a single-use ticket or BLOCK with every reason. Sends NO order. side is BUY or SELL; sl and tp are absolute prices; risk_pct defaults to the configured maximum. tags is an optional comma-separated label set for the journal (e.g. setup:sweep,session:london) so results can be reviewed by tag later. max_hold_seconds (0-3600, default 0 = none) sets an exit timer: after placing, the server closes the position at market once the time is up if the stop/target have not hit first."""
+        return await run(service.prepare_trade, symbol, side, sl, tp, risk_pct, note, tags, max_hold_seconds)
 
     @mcp.tool(annotations=_ORDER)
     async def place_prepared_trade(ticket_id: str) -> dict:
@@ -148,7 +148,9 @@ def main() -> None:
         except FileNotFoundError as exc:  # optional piece: don't take the whole server down
             print(f"mt5-ai: rule setup disabled ({exc})", file=sys.stderr)
 
-    build_server(Mt5Service(broker, settings, forecaster=forecaster, setup=setup)).run()
+    service = Mt5Service(broker, settings, forecaster=forecaster, setup=setup)
+    service.start_watchdog()
+    build_server(service).run()
 
 
 if __name__ == "__main__":

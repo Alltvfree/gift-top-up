@@ -13,6 +13,7 @@ anything this server did not open.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -49,6 +50,11 @@ class Mt5Service:
         self._log_path = Path(settings.state_dir) / "trades.jsonl"
         self.halt_file = Path(settings.state_dir) / "HALT"
         self._tags: dict[str, str] = {}
+        self._hold: dict[str, int] = {}           # ticket id -> seconds to hold, set at prepare time
+        self._clock = clock
+        self._expiry_path = Path(settings.state_dir) / "expiries.json"
+        self._expiries: dict[int, dict] = self._load_expiries()   # position -> {"deadline": epoch, "tries": n}
+        self._watchdog: threading.Thread | None = None
 
     # --- audit log ----------------------------------------------------------
     def _log(self, event: str, **data) -> None:
@@ -159,10 +165,12 @@ class Mt5Service:
         ours_open = sum(1 for p in self.broker.positions() if p["magic"] == self.s.magic)
         return AccountContext(account["is_demo"], account["balance"], account["equity"], t["realized"], t["trades_ours"], ours_open)
 
-    def prepare_trade(self, symbol: str, side: str, sl: float, tp: float, risk_pct: float | None = None, note: str = "", tags: str = "") -> dict:
+    def prepare_trade(self, symbol: str, side: str, sl: float, tp: float, risk_pct: float | None = None, note: str = "", tags: str = "", max_hold_seconds: int = 0) -> dict:
         if self.halted():
             return {"verdict": "BLOCK", "reasons": [self._HALT_MSG.format(path=self.halt_file)], "checks": []}
         side = side.upper()
+        if not 0 <= max_hold_seconds <= 3600:
+            return {"verdict": "BLOCK", "reasons": ["max_hold_seconds must be between 0 (no timer) and 3600."], "checks": []}
         risk_pct = self.s.max_risk_pct if risk_pct is None else risk_pct
         a, spec, tk = self.broker.account(), self.broker.spec(symbol), self.broker.tick(symbol)
         entry = tk["ask"] if side == "BUY" else tk["bid"]
@@ -180,8 +188,9 @@ class Mt5Service:
         t = self.tickets.issue(symbol=spec.symbol, side=side, lots=ev.lots, sl=sl, tp=tp, ref_price=entry,
                                risk_pct=risk_pct, risk_money=ev.risk_money, rr=ev.rr, note=note)
         self._tags[t.id] = tags
+        self._hold[t.id] = max_hold_seconds
         self._log("prepared", ticket=t.id, fingerprint=t.fingerprint, symbol=t.symbol, side=side, lots=t.lots, sl=sl, tp=tp,
-                  note=note, tags=tags, risk_money=round(ev.risk_money, 2), rr=round(ev.rr, 2))
+                  note=note, tags=tags, risk_money=round(ev.risk_money, 2), rr=round(ev.rr, 2), max_hold_seconds=max_hold_seconds)
         return {"verdict": "PASS", "ticket_id": t.id, "fingerprint": t.fingerprint, "expires_in_seconds": self.s.ticket_ttl_seconds,
                 "ticket": self.tickets.describe(t, spec.digits), "checks": _checks(ev.checks),
                 "next": "Show the person this ticket. Only if they reply with an explicit yes for THIS ticket, call place_prepared_trade."}
@@ -220,8 +229,77 @@ class Mt5Service:
         if not res["ok"]:
             return {"placed": False, "ticket": t.id, "error": f"Broker rejected the order: {res['comment']} (retcode {res['retcode']}).",
                     "note": "The ticket is spent. Do not retry without a new check and a new yes."}
-        return {"placed": True, "ticket": t.id, "side": t.side, "symbol": t.symbol, "lots": res["volume"], "fill_price": res["price"],
-                "stop_loss": t.sl, "take_profit": t.tp, "position_ticket": res["order"], "max_loss_at_stop": round(t.risk_money, 2)}
+        hold = self._hold.pop(t.id, 0)
+        out = {"placed": True, "ticket": t.id, "side": t.side, "symbol": t.symbol, "lots": res["volume"], "fill_price": res["price"],
+               "stop_loss": t.sl, "take_profit": t.tp, "position_ticket": res["order"], "max_loss_at_stop": round(t.risk_money, 2)}
+        if hold:
+            self._schedule_exit(res["order"], hold)
+            out["timed_exit"] = (f"Will be closed at market after {hold}s if the stop/target haven't hit first. The timer lives inside this "
+                                 "server process: if Claude Desktop is closed, no timed exit happens (the broker-side stop and target stay).")
+        return out
+
+    # --- timed exits ------------------------------------------------------------
+    def _load_expiries(self) -> dict[int, dict]:
+        try:
+            raw = json.loads(self._expiry_path.read_text(encoding="utf-8"))
+            return {int(k): v for k, v in raw.items()}
+        except (OSError, ValueError):
+            return {}
+
+    def _save_expiries(self) -> None:
+        try:
+            self._expiry_path.parent.mkdir(parents=True, exist_ok=True)
+            self._expiry_path.write_text(json.dumps(self._expiries), encoding="utf-8")
+        except OSError:
+            pass
+
+    def _schedule_exit(self, position: int, seconds: int) -> None:
+        self._expiries[int(position)] = {"deadline": self._clock() + seconds, "tries": 0}
+        self._save_expiries()
+        self._log("exit_scheduled", position=position, seconds=seconds)
+
+    def run_expiries(self) -> list[int]:
+        """Closes (at market) any of THIS server's positions whose timer ran out. Only ever closes; a position that is
+        already gone (stop or target hit) just drops its timer. Returns the positions it closed."""
+        closed: list[int] = []
+        now = self._clock()
+        open_ours = {p["ticket"] for p in self.broker.positions() if p["magic"] == self.s.magic} if self._expiries else set()
+        for pos, info in list(self._expiries.items()):
+            if pos not in open_ours:
+                self._expiries.pop(pos, None)           # closed by its stop/target (or by hand): nothing to do
+                continue
+            if now < info["deadline"]:
+                continue
+            try:
+                res = self.close_position(pos)
+            except Exception as exc:  # noqa: BLE001 - the watchdog must never die
+                res = {"closed": False, "broker": str(exc)}
+            if res.get("closed"):
+                self._log("timed_exit", position=pos)
+                closed.append(pos)
+                self._expiries.pop(pos, None)
+            else:
+                info["tries"] += 1
+                if info["tries"] >= 5:                  # give up loudly; the broker-side stop/target still protect it
+                    self._log("timed_exit_failed", position=pos, detail=res.get("broker"))
+                    self._expiries.pop(pos, None)
+        self._save_expiries()
+        return closed
+
+    def start_watchdog(self, interval: float = 2.0) -> None:
+        if self._watchdog is not None:
+            return
+
+        def loop():
+            while True:
+                try:
+                    self.run_expiries()
+                except Exception:  # noqa: BLE001
+                    pass
+                time.sleep(interval)
+
+        self._watchdog = threading.Thread(target=loop, name="mt5-ai-timed-exits", daemon=True)
+        self._watchdog.start()
 
     def journal_review(self, days: int = 120) -> dict:
         """How the trades this server placed actually ended, in R, overall and by tag."""
