@@ -25,7 +25,10 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from setups.gabfx import gabfx_snr2, gabfx_snr3  # noqa: E402
 from setups.library import STRATEGIES, confluence  # noqa: E402
+
+STRATEGIES = {**STRATEGIES, "gabfx_snr2": gabfx_snr2, "gabfx_snr3": gabfx_snr3}
 
 from .account import Account  # noqa: E402
 from .config import BacktestConfig, load_config  # noqa: E402
@@ -75,13 +78,14 @@ def null_expectancy(frame, cfg, spec, n_null: int, seed: int) -> tuple[float, fl
 
 
 def compare(base_raw: pd.DataFrame, higher_raw: pd.DataFrame | None, cfg: BacktestConfig, spec: SymbolSpec,
-            min_trades: int = MIN_TRADES_FOR_VERDICT, n_null: int = 5) -> pd.DataFrame:
+            min_trades: int = MIN_TRADES_FOR_VERDICT, n_null: int = 5, only: list[str] | None = None) -> pd.DataFrame:
     if cfg.spread.mode == "historical":
         base_raw, _ = sanitize_spread(base_raw)
     base_raw = base_raw.reset_index(drop=True)
 
-    frames: dict[str, pd.DataFrame] = {name: fn(base_raw, spec.point) for name, fn in STRATEGIES.items()}
-    if higher_raw is not None:
+    chosen = {k: v for k, v in STRATEGIES.items() if not only or k in only}
+    frames: dict[str, pd.DataFrame] = {name: fn(base_raw, spec.point) for name, fn in chosen.items()}
+    if higher_raw is not None and (not only or "trend_pullback" in only):
         from .setup_backtest import build_signal_frame
         from setups.trend_pullback import load_setup_params
 
@@ -89,8 +93,8 @@ def compare(base_raw: pd.DataFrame, higher_raw: pd.DataFrame | None, cfg: Backte
 
     rows, results = [], {}
     names = list(frames)
-    combos = {f"agree2({a}+{b})": confluence({a: frames[a], b: frames[b]}) for i, a in enumerate(names) for b in names[i + 1:]}
-    if len(names) >= 3:
+    combos = {} if only else {f"agree2({a}+{b})": confluence({a: frames[a], b: frames[b]}) for i, a in enumerate(names) for b in names[i + 1:]}
+    if len(names) >= 3 and not only:
         combos["agree2(all)"] = confluence(frames, min_agree=2)
         combos["agree3(all)"] = confluence(frames, min_agree=3)
     for label, frame in {**frames, **combos}.items():
@@ -115,6 +119,7 @@ def main() -> None:
     ap.add_argument("--bars", type=int, default=50000)
     ap.add_argument("--min-trades", type=int, default=MIN_TRADES_FOR_VERDICT)
     ap.add_argument("--null", type=int, default=5, help="Time-shifted null runs per setup (0 = skip).")
+    ap.add_argument("--only", default=None, help="Comma-separated setup names to run alone (no combinations), e.g. gabfx_snr2,gabfx_snr3.")
     ap.add_argument("--spec-from-mt5", action="store_true")
     ap.add_argument("--base-csv", default=None)
     ap.add_argument("--higher-csv", default=None)
@@ -149,7 +154,7 @@ def main() -> None:
     if higher_raw is not None:
         higher_raw, _ = validate_ohlc(higher_raw, cfg.symbol, cfg.higher_timeframe)
 
-    table = compare(base_raw, higher_raw, cfg, spec, a.min_trades, a.null)
+    table = compare(base_raw, higher_raw, cfg, spec, a.min_trades, a.null, a.only.split(",") if a.only else None)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(a.out, index=False)
     with pd.option_context("display.width", 200, "display.max_columns", 20, "display.float_format", "{:+.3f}".format):

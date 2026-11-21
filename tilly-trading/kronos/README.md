@@ -465,3 +465,12 @@ python -m backtest.compare_setups --config config/setup_xauusd.toml --symbol XAU
 Rules are fixed from the sources, not tuned. Order blocks / FVG / volumetric
 metrics are not transcribed (drawing tools with many free parameters). A combined
 signal should only be built from rows that show a demonstrated edge here.
+
+### GABFX ebook setup (`setups/gabfx.py`)
+
+A fixed-rule reading of the "Mastermind" ebook: two-candle zones, daily storyline with a weekly
+gate ("conflict = no trade"), entry when a new zone forms inside a daily zone (`gabfx_snr2`), and a
+stricter breakout-plus-pullback version (`gabfx_snr3`). Where the ebook is vague the choices are
+documented in the module. Its sizing/"deposit big" advice is deliberately not used.
+
+    python -m backtest.compare_setups --config config\setup_xauusd_h1.toml --symbol XAUUSDm --only gabfx_snr2,gabfx_snr3
