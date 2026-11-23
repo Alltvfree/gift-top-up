@@ -38,6 +38,7 @@ STRATEGIES = {**STRATEGIES, "gabfx_snr2": gabfx_snr2, "gabfx_snr3": gabfx_snr3,
 from .account import Account  # noqa: E402
 from .config import BacktestConfig, load_config  # noqa: E402
 from .data_quality import validate_ohlc  # noqa: E402
+from .fdr import benjamini_hochberg, normal_two_sided_p  # noqa: E402
 from .setup_backtest import WARMUP_BARS, _load_csv, sanitize_spread  # noqa: E402
 from .setup_stats import MIN_TRADES_FOR_VERDICT, add_r_multiple, edge_stats, verdict  # noqa: E402
 from .simulator import run_simulation, trades_to_frame  # noqa: E402
@@ -83,7 +84,8 @@ def null_expectancy(frame, cfg, spec, n_null: int, seed: int) -> tuple[float, fl
 
 
 def compare(base_raw: pd.DataFrame, higher_raw: pd.DataFrame | None, cfg: BacktestConfig, spec: SymbolSpec,
-            min_trades: int = MIN_TRADES_FOR_VERDICT, n_null: int = 5, only: list[str] | None = None) -> pd.DataFrame:
+            min_trades: int = MIN_TRADES_FOR_VERDICT, n_null: int = 5, only: list[str] | None = None,
+            family_size: int | None = None) -> pd.DataFrame:
     if cfg.spread.mode == "historical":
         base_raw, _ = sanitize_spread(base_raw)
     base_raw = base_raw.reset_index(drop=True)
@@ -113,7 +115,13 @@ def compare(base_raw: pd.DataFrame, higher_raw: pd.DataFrame | None, cfg: Backte
             "win_rate": r.get("win_rate"), "expectancy_r": r.get("expectancy_r"),
             "ci_low": r.get("expectancy_r_ci95_low"), "ci_high": r.get("expectancy_r_ci95_high"),
             "null_expectancy_r": r.get("null_expectancy_r"), "verdict": r["verdict"].split(" — ")[0],
+            "p_value": normal_two_sided_p(r["t_stat"]) if r.get("trades") and r.get("t_stat") is not None else float("nan"),
         })
+    q = benjamini_hochberg([row["p_value"] for row in rows], family_size)
+    for row, qv in zip(rows, q):
+        row["q_value"] = qv
+        # the only rows worth a second look: enough trades, positive, and still significant after correcting for how many we tried
+        row["survives_fdr"] = bool(row["trades"] >= min_trades and (row["expectancy_r"] or 0) > 0 and qv == qv and qv < 0.05)
     return pd.DataFrame(rows)
 
 
@@ -125,6 +133,7 @@ def main() -> None:
     ap.add_argument("--min-trades", type=int, default=MIN_TRADES_FOR_VERDICT)
     ap.add_argument("--null", type=int, default=5, help="Time-shifted null runs per setup (0 = skip).")
     ap.add_argument("--only", default=None, help="Comma-separated setup names to run alone (no combinations), e.g. gabfx_snr2,gabfx_snr3.")
+    ap.add_argument("--family-size", type=int, default=None, help="Total number of ideas you have tested on this symbol (including earlier runs); makes the multiple-testing correction honest.")
     ap.add_argument("--spec-from-mt5", action="store_true")
     ap.add_argument("--base-csv", default=None)
     ap.add_argument("--higher-csv", default=None)
@@ -159,14 +168,15 @@ def main() -> None:
     if higher_raw is not None:
         higher_raw, _ = validate_ohlc(higher_raw, cfg.symbol, cfg.higher_timeframe)
 
-    table = compare(base_raw, higher_raw, cfg, spec, a.min_trades, a.null, a.only.split(",") if a.only else None)
+    table = compare(base_raw, higher_raw, cfg, spec, a.min_trades, a.null, a.only.split(",") if a.only else None, a.family_size)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(a.out, index=False)
     with pd.option_context("display.width", 200, "display.max_columns", 20, "display.float_format", "{:+.3f}".format):
-        print(table.to_string(index=False))
+        print(table.drop(columns=["signals", "p_value"]).to_string(index=False))
     print(f"\nWritten to {a.out}")
-    print("Read this honestly: a row is only interesting if its verdict is POSITIVE EXPECTANCY SUPPORTED, "
-          "its CI is above zero AND it sits clearly above its own null. With ~10 rows, one 'good' row is expected by chance.")
+    print("Read this honestly: a row is only interesting if its verdict is POSITIVE EXPECTANCY SUPPORTED, its CI is above zero, "
+          "it sits clearly above its own null AND survives_fdr is True (still real after correcting for how many ideas were tried;"
+          " pass --family-size N with your TOTAL count of ideas tested on this symbol, not just this table).")
 
 
 if __name__ == "__main__":

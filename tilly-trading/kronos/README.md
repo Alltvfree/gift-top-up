@@ -488,3 +488,8 @@ choosing the side three ways: with the hourly trend, against it, or at random. D
 scored with this project's own exits (stop 1.5 x ATR, target 2R) so the results are comparable. Crypto config: `config/setup_btcusd_h1.toml`.
 
     python -m backtest.compare_setups --config config\setup_btcusd_h1.toml --symbol BTCUSDm --bars 40000 --only hb_bollinger,hb_macd_bb,hb_supertrend --null 3 --out reports\compare_hb_btc.csv
+
+### Multiple-testing correction (`backtest/fdr.py`)
+
+`compare_setups` now adds `p_value`, `q_value` (Benjamini-Hochberg) and `survives_fdr`. Pass `--family-size N` with the TOTAL number of
+ideas you have tested on a symbol: a row only counts if it is positive, has 500+ trades, and still has q < 0.05 after that correction.
