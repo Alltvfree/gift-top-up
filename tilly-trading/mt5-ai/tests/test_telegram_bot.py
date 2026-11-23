@@ -288,3 +288,69 @@ def test_malformed_or_unknown_button_data_places_nothing(env, data):
     mt5, svc = env
     _run_updates(svc, [_press(ME, data)])
     assert mt5.sent == []
+
+
+# --- one-tap BUY / SELL ---------------------------------------------------------------------------
+from mt5_ai.telegram_bot import BTN_BUY, BTN_SELL, MENU_KEYBOARD
+
+
+def test_buy_button_builds_a_ticket_from_the_live_price_and_places_nothing(env):
+    mt5, svc = env                                     # fake: bid 5000.00, ask 5000.25, M5 ranges 4.0
+    r = bot(svc).handle_reply(ME, BTN_BUY)
+    assert r.ticket_id and "TICKET" in r.text and mt5.sent == []
+    assert "stop 4.00 away" in r.text and "exit timer 90s" in r.text
+    assert "stop-loss 4996.25" in r.text and "take-profit 5008.25" in r.text      # ask -4, +2x4 on the other side
+
+
+def test_sell_button_mirrors_it(env):
+    mt5, svc = env
+    r = bot(svc).handle_reply(ME, BTN_SELL)
+    assert "SELL" in r.text and "stop-loss 5004.00" in r.text and "take-profit 4992.00" in r.text and mt5.sent == []
+
+
+def test_overrides_for_stop_rr_and_hold_work_and_are_validated(env):
+    _, svc = env
+    r = bot(svc).handle_reply(ME, "/buy XAUUSD stop 3 rr 3 hold 45")
+    assert "stop-loss 4997.25" in r.text and "take-profit 5009.25" in r.text and "exit timer 45s" in r.text
+    assert "Usage" in bot(svc).handle(ME, "/buy stop") and "Usage" in bot(svc).handle(ME, "/sell stop x")
+
+
+def test_a_stop_that_is_too_tight_for_the_spread_is_blocked_not_forced(env):
+    mt5, svc = env
+    out = bot(svc).handle(ME, "/buy stop 0.5")
+    assert "BLOCKED" in out and "/yes" not in out and mt5.sent == []
+
+
+def test_configured_defaults_are_used(env):
+    _, svc = env
+    b = BotHandler(svc, {ME}, symbol="XAUUSD", quick_hold=30, quick_rr=3.0, quick_stop=5.0)
+    out = b.handle(ME, "/buy")
+    assert "stop 5.00 away" in out and "exit timer 30s" in out and "take-profit 5015.25" in out
+
+
+def test_buttons_from_strangers_do_nothing(env):
+    mt5, svc = env
+    assert bot(svc).handle(STRANGER, BTN_BUY) is None and mt5.sent == []
+
+
+def test_start_shows_the_menu_keyboard_and_the_other_buttons_map_to_commands(env):
+    _, svc = env
+    b = bot(svc)
+    assert b.handle_reply(ME, "/start").menu and b.handle_reply(ME, "/menu").menu and not b.handle_reply(ME, "/status").menu
+    assert "DEMO" in b.handle(ME, "\U0001F4CA Status") and "bid" in b.handle(ME, "\U0001F4C8 Quote")
+
+
+def test_transport_sends_the_menu_keyboard_with_start_and_approve_buttons_with_a_quick_ticket(env):
+    mt5, svc = env
+    calls = _run_updates(svc, [_msg(ME, "/start", 1), _msg(ME, BTN_BUY, 2)])
+    sent = [b for m, b in calls if m == "sendMessage"]
+    assert sent[0]["reply_markup"] == MENU_KEYBOARD
+    assert sent[1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"].startswith("ok:") and mt5.sent == []
+
+
+def test_quick_settings_come_from_the_environment():
+    s = BotSettings.from_env({"MT5_AI_TELEGRAM_TOKEN": "t", "MT5_AI_TELEGRAM_ALLOWED_IDS": "1", "MT5_AI_QUICK_HOLD": "60",
+                              "MT5_AI_QUICK_RR": "2.5", "MT5_AI_QUICK_STOP": "1.8"})
+    assert (s.quick_hold, s.quick_rr, s.quick_stop) == (60, 2.5, 1.8)
+    d = BotSettings.from_env({"MT5_AI_TELEGRAM_TOKEN": "t", "MT5_AI_TELEGRAM_ALLOWED_IDS": "1"})
+    assert (d.quick_hold, d.quick_rr, d.quick_stop) == (90, 2.0, None)

@@ -111,3 +111,8 @@ Only the ids you list are served; everyone else is ignored. `/plan` prepares a t
 and the key in `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_API_KEY`. The AI only returns text;
 it can propose a ticket but can never place one. Claude Desktop (`python -m mt5_ai`) and the bot can run
 at the same time; both read the same HALT file and the broker's own trade counts.
+
+**One-tap BUY / SELL.** Send `/start` (or `/menu`) to get a keyboard with BUY, SELL, Quote, Status, Positions and Halt.
+BUY/SELL build a ticket from the live price: stop = the larger of 6x the spread and the recent M5 range,
+target = rr x stop, exit timer = hold seconds. Override per tap with `/buy stop 2 rr 2.5 hold 60`, or set defaults with
+`MT5_AI_QUICK_STOP`, `MT5_AI_QUICK_RR` (default 2), `MT5_AI_QUICK_HOLD` (default 90). The ticket still needs Approve.

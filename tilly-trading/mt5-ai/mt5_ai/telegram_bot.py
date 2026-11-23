@@ -43,6 +43,7 @@ HELP = ("Commands:\n"
         "/positions  open positions\n"
         "/today  today's result and loss budget left\n"
         "/plan ...  prepare a ticket (sends NO order)\n"
+        "/buy or /sell [SYMBOL] [stop D] [rr R] [hold S]  one-tap ticket from the live price (also the BUY / SELL buttons)\n"
         "/yes ID  place that exact ticket\n"
         "/close POSITION  close one position this server opened\n"
         "/halt  stop all new trades (you resume by deleting the HALT file)\n"
@@ -71,6 +72,9 @@ class BotSettings:
     provider: str | None = None
     model: str | None = None
     llm_key: str | None = field(default=None, repr=False)
+    quick_hold: int = 90
+    quick_rr: float = 2.0
+    quick_stop: float | None = None     # price distance; None = automatic from spread and recent range
 
     @classmethod
     def from_env(cls, env: dict | None = None) -> "BotSettings":
@@ -89,14 +93,28 @@ class BotSettings:
                 raise SystemExit(f"MT5_AI_LLM_PROVIDER must be one of {PROVIDERS}.")
             model = (e.get("MT5_AI_LLM_MODEL") or DEFAULT_MODELS.get(provider) or "").strip() or None
             key = (e.get(KEY_ENV[provider]) or "").strip() or None
+        def num(name, default, cast):
+            raw = (e.get(name) or "").strip()
+            return cast(raw) if raw else default
+
         return cls(token=token, allowed_ids=ids, symbol=e.get("MT5_AI_TELEGRAM_SYMBOL") or "XAUUSDm",
-                   provider=provider, model=model, llm_key=key)
+                   provider=provider, model=model, llm_key=key, quick_hold=num("MT5_AI_QUICK_HOLD", 90, int),
+                   quick_rr=num("MT5_AI_QUICK_RR", 2.0, float), quick_stop=num("MT5_AI_QUICK_STOP", None, float))
+
+
+BTN_BUY, BTN_SELL = "\U0001F7E2 BUY", "\U0001F534 SELL"
+BTN_QUOTE, BTN_STATUS, BTN_POS, BTN_HALT = "\U0001F4C8 Quote", "\U0001F4CA Status", "\U0001F4C2 Positions", "\U0001F6D1 Halt"
+BUTTON_COMMANDS = {BTN_BUY: "/buy", BTN_SELL: "/sell", BTN_QUOTE: "/quote", BTN_STATUS: "/status", BTN_POS: "/positions", BTN_HALT: "/halt"}
+MENU_KEYBOARD = {"keyboard": [[{"text": BTN_BUY}, {"text": BTN_SELL}], [{"text": BTN_QUOTE}, {"text": BTN_STATUS}, {"text": BTN_POS}], [{"text": BTN_HALT}]],
+                 "resize_keyboard": True, "is_persistent": True}
+QUICK_USAGE = "Usage: /buy or /sell [SYMBOL] [stop PRICE_DISTANCE] [rr RATIO] [hold SECONDS]"
 
 
 @dataclass
 class Reply:
     text: str
     ticket_id: str | None = None      # set when the text is a fresh ticket: the transport adds Approve/Reject buttons
+    menu: bool = False                # show the BUY / SELL / Quote... keyboard
 
 
 def _kv(d: dict, skip=()) -> str:
@@ -139,10 +157,12 @@ def parse_plan(args: list[str], default_symbol: str) -> dict | str:
 
 class BotHandler:
     def __init__(self, service, allowed_ids, *, symbol: str = "XAUUSDm", llm: Callable[[str, str], str] | None = None,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, quick_hold: int = 90, quick_rr: float = 2.0, quick_stop: float | None = None):
         self.svc, self.allowed, self.symbol, self.llm, self.clock = service, frozenset(allowed_ids), symbol, llm, clock
+        self.quick_hold, self.quick_rr, self.quick_stop = quick_hold, quick_rr, quick_stop
         self._last_llm = 0.0
         self._ticket_out: str | None = None
+        self._menu_out = False
 
     # ---------------------------------------------------------------- entry
     def handle(self, user_id: int, text: str) -> str | None:
@@ -151,9 +171,9 @@ class BotHandler:
 
     def handle_reply(self, user_id: int, text: str) -> Reply | None:
         """None means 'ignore silently' (not an allowed user)."""
-        self._ticket_out = None
+        self._ticket_out, self._menu_out = None, False
         out = self._handle(user_id, text)
-        return None if out is None else Reply(out, self._ticket_out)
+        return None if out is None else Reply(out, self._ticket_out, self._menu_out)
 
     def approve(self, user_id: int, ticket_id: str) -> str | None:
         """The Approve button. Same as /yes <id>: places exactly that ticket, once."""
@@ -172,7 +192,7 @@ class BotHandler:
     def _handle(self, user_id: int, text: str) -> str | None:
         if user_id not in self.allowed:
             return None
-        text = (text or "").strip()
+        text = BUTTON_COMMANDS.get((text or "").strip(), (text or "").strip())
         if not text:
             return None
         try:
@@ -186,8 +206,13 @@ class BotHandler:
             return f"Error: {type(exc).__name__}: {str(exc)[:300]}"
 
     def _command(self, cmd: str, args: list[str], raw: str) -> str:
-        if cmd in ("/start", "/help"):
+        if cmd in ("/start", "/menu"):
+            self._menu_out = True
+            return "Menu on. Tap BUY or SELL to prepare a ticket from the live price, then Approve to place it.\n\n" + HELP
+        if cmd == "/help":
             return HELP
+        if cmd in ("/buy", "/sell"):
+            return self._quick(cmd[1:].upper(), args)
         if cmd == "/status":
             return _kv(self.svc.account_overview()) + "\n" + _kv(self.svc.todays_summary(self.symbol))
         if cmd == "/quote":
@@ -223,6 +248,33 @@ class BotHandler:
         if isinstance(p, str):
             return p
         return self._prepare(p["symbol"], p["side"], p["sl"], p["tp"], p["risk_pct"], p["note"], p["tags"], p["hold"])
+
+    def _quick(self, side: str, args: list[str]) -> str:
+        """One-tap trade: stop and target are computed from the live quote. Still only a TICKET."""
+        symbol, stop, rr, hold, rest = self.symbol, self.quick_stop, self.quick_rr, self.quick_hold, list(args)
+        if rest and rest[0].lower() not in ("stop", "rr", "hold"):
+            symbol, rest = rest[0], rest[1:]
+        i = 0
+        while i < len(rest):
+            k = rest[i].lower()
+            if k not in ("stop", "rr", "hold") or i + 1 >= len(rest):
+                return f"Could not read '{rest[i]}'.\n" + QUICK_USAGE
+            try:
+                v = rest[i + 1]
+                stop, rr, hold = (float(v), rr, hold) if k == "stop" else (stop, float(v), hold) if k == "rr" else (stop, rr, int(v))
+            except ValueError:
+                return f"'{rest[i + 1]}' is not a valid number for {k}.\n" + QUICK_USAGE
+            i += 2
+        q = self.svc.get_quote(symbol)
+        digits = self.svc.broker.spec(q["symbol"]).digits
+        entry = q["ask"] if side == "BUY" else q["bid"]
+        if stop is None:   # at least 6x the spread (the server blocks a spread above 20% of the stop), else the recent M5 range
+            rows = self.svc.get_candles(q["symbol"], "M5", 12)["rows"]
+            stop = max(6 * q["spread_price"], sum(r[2] - r[3] for r in rows) / max(len(rows), 1))
+        sign = 1 if side == "BUY" else -1
+        sl, tp = round(entry - sign * stop, digits), round(entry + sign * rr * stop, digits)
+        return (f"Quick {side} {q['symbol']} at about {entry}: stop {stop:.{digits}f} away, target {rr:g}x that, exit timer {hold}s.\n\n"
+                + self._prepare(q["symbol"], side, sl, tp, None, f"quick {side.lower()} from the Telegram button", "style:quick", hold))
 
     def _prepare(self, symbol, side, sl, tp, risk_pct, note, tags, hold) -> str:
         r = self.svc.prepare_trade(symbol, side, sl, tp, risk_pct, note, tags, hold)
@@ -287,10 +339,15 @@ def run(settings: BotSettings, handler: BotHandler, *, client: httpx.Client | No
     def call(method: str, **payload):
         return client.post(f"{api}/{method}", json=payload)
 
-    def send(chat_id, text, ticket_id=None):
+    def send(chat_id, text, ticket_id=None, menu=False):
         parts = list(_chunks(text)) or ["(empty)"]
         for i, part in enumerate(parts):
-            extra = {"reply_markup": _keyboard(ticket_id)} if ticket_id and i == len(parts) - 1 else {}
+            extra = {}
+            if i == len(parts) - 1:
+                if ticket_id:
+                    extra = {"reply_markup": _keyboard(ticket_id)}
+                elif menu:
+                    extra = {"reply_markup": MENU_KEYBOARD}
             call("sendMessage", chat_id=chat_id, text=part, **extra)
 
     def on_message(m: dict) -> None:
@@ -301,7 +358,7 @@ def run(settings: BotSettings, handler: BotHandler, *, client: httpx.Client | No
         if reply is None:
             print(f"ignored a message from a user id that is not allowed: {uid}", flush=True)
             return
-        send(m["chat"]["id"], reply.text, reply.ticket_id)
+        send(m["chat"]["id"], reply.text, reply.ticket_id, reply.menu)
 
     def on_button(q: dict) -> None:
         uid = (q.get("from") or {}).get("id")
@@ -347,7 +404,8 @@ def main() -> None:
             raise SystemExit(f"AI chat is enabled but {KEY_ENV[s.provider]} is not set on this machine.")
         provider, model, key = s.provider, s.model, s.llm_key
         llm = lambda system, user: complete(provider, model, system, user, api_key=key)  # noqa: E731
-    run(s, BotHandler(make_service(), s.allowed_ids, symbol=s.symbol, llm=llm))
+    run(s, BotHandler(make_service(), s.allowed_ids, symbol=s.symbol, llm=llm,
+                      quick_hold=s.quick_hold, quick_rr=s.quick_rr, quick_stop=s.quick_stop))
 
 
 if __name__ == "__main__":
