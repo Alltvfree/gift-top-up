@@ -481,3 +481,10 @@ Tests the BUY/SELL ticket geometry on one-minute bars (stop = max(6 x spread, 5-
 choosing the side three ways: with the hourly trend, against it, or at random. Daily limits are off in this config on purpose.
 
     python -m backtest.compare_setups --config config\setup_xauusd_m1.toml --symbol XAUUSDm --bars 60000 --only quick_trend,quick_counter,quick_random --null 2 --out reports\compare_quick.csv
+
+### Hummingbot-derived strategies (`setups/hummingbot.py`)
+
+`hb_bollinger`, `hb_macd_bb` and `hb_supertrend`: the signal rules of Hummingbot's directional controllers (Apache 2.0),
+scored with this project's own exits (stop 1.5 x ATR, target 2R) so the results are comparable. Crypto config: `config/setup_btcusd_h1.toml`.
+
+    python -m backtest.compare_setups --config config\setup_btcusd_h1.toml --symbol BTCUSDm --bars 40000 --only hb_bollinger,hb_macd_bb,hb_supertrend --null 3 --out reports\compare_hb_btc.csv

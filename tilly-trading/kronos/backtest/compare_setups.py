@@ -26,11 +26,13 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from setups.gabfx import gabfx_snr2, gabfx_snr3  # noqa: E402
+from setups.hummingbot import hb_bollinger, hb_macd_bb, hb_supertrend  # noqa: E402
 from setups.quick import (quick15_counter, quick15_random, quick15_trend, quick_counter, quick_random, quick_trend)  # noqa: E402
 from setups.library import STRATEGIES, confluence  # noqa: E402
 
 STRATEGIES = {**STRATEGIES, "gabfx_snr2": gabfx_snr2, "gabfx_snr3": gabfx_snr3,
               "quick_trend": quick_trend, "quick_counter": quick_counter, "quick_random": quick_random,
+              "hb_bollinger": hb_bollinger, "hb_macd_bb": hb_macd_bb, "hb_supertrend": hb_supertrend,
               "quick15_trend": quick15_trend, "quick15_counter": quick15_counter, "quick15_random": quick15_random}
 
 from .account import Account  # noqa: E402
