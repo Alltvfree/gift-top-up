@@ -122,7 +122,9 @@ def build_server(service: Mt5Service) -> FastMCP:
     return mcp
 
 
-def main() -> None:
+def make_service() -> Mt5Service:
+    """Connects to the MT5 terminal and builds the service. Shared by the Claude Desktop (MCP)
+    entry point and the Telegram bot, so both enforce exactly the same limits."""
     from .broker import Mt5Broker
     from .config import Settings
 
@@ -150,7 +152,11 @@ def main() -> None:
 
     service = Mt5Service(broker, settings, forecaster=forecaster, setup=setup)
     service.start_watchdog()
-    build_server(service).run()
+    return service
+
+
+def main() -> None:
+    build_server(make_service()).run()
 
 
 if __name__ == "__main__":

@@ -93,3 +93,21 @@ Safety: `halt_trading`.
 pip install pytest "mcp<2" pandas numpy
 pytest tests
 ```
+
+## Telegram bot (optional, runs on the machine with MT5)
+
+A bot of your own, same limits as the Claude Desktop connection (both use the same service).
+
+1. In Telegram, talk to **@BotFather**: `/newbot`. It gives you a **token**. That token is a password.
+2. Get your numeric Telegram id from **@userinfobot**.
+3. On the machine running MT5, set (type these yourself, never paste a token into a chat):
+   `setx MT5_AI_TELEGRAM_TOKEN "<token>"`, `setx MT5_AI_TELEGRAM_ALLOWED_IDS "<your id>"`,
+   optionally `setx MT5_AI_TELEGRAM_SYMBOL "XAUUSDm"` and `setx MT5_AI_SYMBOLS "XAUUSD*,BTCUSD*"`.
+4. Open a NEW PowerShell and run `C:\mt5-ai\start_bot.ps1`. Message your bot `/help`.
+
+Only the ids you list are served; everyone else is ignored. `/plan` prepares a ticket (sends nothing),
+`/yes <id>` places exactly that ticket. Optional AI chat (`/ask`, or just type): set
+`MT5_AI_LLM_PROVIDER` to `anthropic`, `openai` or `google`, `MT5_AI_LLM_MODEL` (required for openai/google),
+and the key in `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_API_KEY`. The AI only returns text;
+it can propose a ticket but can never place one. Claude Desktop (`python -m mt5_ai`) and the bot can run
+at the same time; both read the same HALT file and the broker's own trade counts.
