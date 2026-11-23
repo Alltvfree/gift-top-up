@@ -17,6 +17,7 @@ Safety design
 - The bot token and API keys come from environment variables on the VPS. They are never logged;
   network errors are reported by type only (the Telegram URL contains the token).
 
+Placing: every fresh ticket arrives with Approve / Reject buttons (or send /yes ID).
 Commands: /help /status /quote [SYMBOL] /positions /today /plan ... /yes ID /close POSITION /halt /journal /ask TEXT
 """
 from __future__ import annotations
@@ -92,6 +93,12 @@ class BotSettings:
                    provider=provider, model=model, llm_key=key)
 
 
+@dataclass
+class Reply:
+    text: str
+    ticket_id: str | None = None      # set when the text is a fresh ticket: the transport adds Approve/Reject buttons
+
+
 def _kv(d: dict, skip=()) -> str:
     return "\n".join(f"{k}: {v}" for k, v in d.items() if k not in skip and not isinstance(v, (dict, list)))
 
@@ -135,10 +142,34 @@ class BotHandler:
                  clock: Callable[[], float] = time.time):
         self.svc, self.allowed, self.symbol, self.llm, self.clock = service, frozenset(allowed_ids), symbol, llm, clock
         self._last_llm = 0.0
+        self._ticket_out: str | None = None
 
     # ---------------------------------------------------------------- entry
     def handle(self, user_id: int, text: str) -> str | None:
+        r = self.handle_reply(user_id, text)
+        return None if r is None else r.text
+
+    def handle_reply(self, user_id: int, text: str) -> Reply | None:
         """None means 'ignore silently' (not an allowed user)."""
+        self._ticket_out = None
+        out = self._handle(user_id, text)
+        return None if out is None else Reply(out, self._ticket_out)
+
+    def approve(self, user_id: int, ticket_id: str) -> str | None:
+        """The Approve button. Same as /yes <id>: places exactly that ticket, once."""
+        return None if user_id not in self.allowed else self._yes([ticket_id])
+
+    def reject(self, user_id: int, ticket_id: str) -> str | None:
+        """The Reject button: burns the ticket so it can never be placed."""
+        if user_id not in self.allowed:
+            return None
+        try:
+            self.svc.tickets.take(ticket_id)
+        except Exception:  # noqa: BLE001 - already used or expired: nothing left to cancel
+            return "That ticket was already used or has expired."
+        return f"Ticket {ticket_id} rejected. Nothing was placed."
+
+    def _handle(self, user_id: int, text: str) -> str | None:
         if user_id not in self.allowed:
             return None
         text = (text or "").strip()
@@ -197,8 +228,9 @@ class BotHandler:
         r = self.svc.prepare_trade(symbol, side, sl, tp, risk_pct, note, tags, hold)
         if r["verdict"] != "PASS":
             return "BLOCKED - nothing was prepared:\n- " + "\n- ".join(r["reasons"])
+        self._ticket_out = r["ticket_id"]
         return (r["ticket"] + (f"\n  exits by timer after {hold}s" if hold else "")
-                + f"\n\nTo place exactly this ticket, send:\n/yes {r['ticket_id']}\n(Expires in {r['expires_in_seconds']}s. Ignore this to cancel.)")
+                + f"\n\nTap Approve to place exactly this ticket, or send /yes {r['ticket_id']}\n(Expires in {r['expires_in_seconds']}s. Ignore it or tap Reject to cancel.)")
 
     def _yes(self, args: list[str]) -> str:
         if len(args) != 1:
@@ -241,28 +273,62 @@ def _chunks(text: str):
         text = text[MAX_MESSAGE:]
 
 
+def _keyboard(ticket_id: str) -> dict:
+    return {"inline_keyboard": [[{"text": "\u2705 Approve", "callback_data": f"ok:{ticket_id}"},
+                                 {"text": "\u274c Reject", "callback_data": f"no:{ticket_id}"}]]}
+
+
 def run(settings: BotSettings, handler: BotHandler, *, client: httpx.Client | None = None, stop=lambda: False) -> None:
     api = f"https://api.telegram.org/bot{settings.token}"
     client = client or httpx.Client(timeout=40.0)
     offset, backoff = 0, 1.0
     print(f"mt5-ai Telegram bot running for {len(settings.allowed_ids)} allowed user(s). AI chat: {'on' if handler.llm else 'off'}.", flush=True)
+
+    def call(method: str, **payload):
+        return client.post(f"{api}/{method}", json=payload)
+
+    def send(chat_id, text, ticket_id=None):
+        parts = list(_chunks(text)) or ["(empty)"]
+        for i, part in enumerate(parts):
+            extra = {"reply_markup": _keyboard(ticket_id)} if ticket_id and i == len(parts) - 1 else {}
+            call("sendMessage", chat_id=chat_id, text=part, **extra)
+
+    def on_message(m: dict) -> None:
+        if (m.get("chat") or {}).get("type") != "private" or "text" not in m:
+            return
+        uid = (m.get("from") or {}).get("id")
+        reply = handler.handle_reply(uid, m["text"])
+        if reply is None:
+            print(f"ignored a message from a user id that is not allowed: {uid}", flush=True)
+            return
+        send(m["chat"]["id"], reply.text, reply.ticket_id)
+
+    def on_button(q: dict) -> None:
+        uid = (q.get("from") or {}).get("id")
+        msg = q.get("message") or {}
+        action, _, ticket_id = (q.get("data") or "").partition(":")
+        text = None
+        if (msg.get("chat") or {}).get("type") == "private" and action in ("ok", "no") and ticket_id:
+            text = handler.approve(uid, ticket_id) if action == "ok" else handler.reject(uid, ticket_id)
+        call("answerCallbackQuery", callback_query_id=q.get("id"))
+        if text is None:
+            print(f"ignored a button press from a user id that is not allowed: {uid}", flush=True)
+            return
+        if msg.get("message_id"):      # remove the buttons so they cannot be pressed twice
+            call("editMessageReplyMarkup", chat_id=msg["chat"]["id"], message_id=msg["message_id"], reply_markup={"inline_keyboard": []})
+        send(msg["chat"]["id"], text)
+
     while not stop():
         try:
-            r = client.post(f"{api}/getUpdates", json={"offset": offset, "timeout": 30, "allowed_updates": ["message"]})
+            r = client.post(f"{api}/getUpdates", json={"offset": offset, "timeout": 30, "allowed_updates": ["message", "callback_query"]})
             if r.status_code != 200:
                 raise httpx.HTTPError(f"HTTP {r.status_code}")
             for u in r.json().get("result", []):
                 offset = u["update_id"] + 1
-                m = u.get("message") or {}
-                if (m.get("chat") or {}).get("type") != "private" or "text" not in m:
-                    continue
-                uid = (m.get("from") or {}).get("id")
-                reply = handler.handle(uid, m["text"])
-                if reply is None:
-                    print(f"ignored a message from a user id that is not allowed: {uid}", flush=True)
-                    continue
-                for part in _chunks(reply):
-                    client.post(f"{api}/sendMessage", json={"chat_id": m["chat"]["id"], "text": part})
+                if u.get("callback_query"):
+                    on_button(u["callback_query"])
+                elif u.get("message"):
+                    on_message(u["message"])
             backoff = 1.0
         except (httpx.HTTPError, ValueError) as exc:
             # The URL (which holds the token) is deliberately NOT printed.

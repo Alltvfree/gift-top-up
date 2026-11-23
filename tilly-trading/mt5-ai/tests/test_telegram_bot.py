@@ -209,3 +209,82 @@ def test_llm_errors_are_clear_and_do_not_leak_the_key():
         complete("openai", "", "s", "u", api_key="k")
     with pytest.raises(LLMError):
         complete("mystery", "m", "s", "u", api_key="k")
+
+
+# --- Approve / Reject buttons ---------------------------------------------------------------------
+import json as _json
+
+
+def _run_updates(svc, updates, handler=None):
+    """Feeds one batch of Telegram updates through run(); returns the API calls the bot made, in order."""
+    calls, state = [], {"polled": 0}
+
+    def route(request: httpx.Request) -> httpx.Response:
+        method = request.url.path.rsplit("/", 1)[-1]
+        body = _json.loads(request.read().decode() or "{}")
+        if method == "getUpdates":
+            state["polled"] += 1
+            return httpx.Response(200, json={"result": updates if state["polled"] == 1 else []})
+        calls.append((method, body))
+        return httpx.Response(200, json={"ok": True})
+
+    client = httpx.Client(transport=httpx.MockTransport(route))
+    run(BotSettings(token="TOKEN123", allowed_ids=frozenset({ME})), handler or bot(svc), client=client, stop=lambda: state["polled"] >= 2)
+    return calls
+
+
+def _msg(uid, text, update_id=1):
+    return {"update_id": update_id, "message": {"message_id": 10, "chat": {"id": uid, "type": "private"}, "from": {"id": uid}, "text": text}}
+
+
+def _press(uid, data, update_id=2):
+    return {"update_id": update_id, "callback_query": {"id": "cb1", "from": {"id": uid}, "data": data,
+            "message": {"message_id": 11, "chat": {"id": uid, "type": "private"}}}}
+
+
+def test_a_fresh_ticket_comes_with_approve_and_reject_buttons_but_a_block_does_not(env):
+    mt5, svc = env
+    ok = _run_updates(svc, [_msg(ME, "/plan buy XAUUSD sl 4995 tp 5010")])
+    sent = [b for m, b in ok if m == "sendMessage"][0]
+    buttons = sent["reply_markup"]["inline_keyboard"][0]
+    assert [b["text"] for b in buttons] == ["✅ Approve", "❌ Reject"] and buttons[0]["callback_data"].startswith("ok:")
+    assert mt5.sent == []
+    blocked = _run_updates(svc, [_msg(ME, "/plan buy XAUUSD sl 5005 tp 5010")])
+    assert "reply_markup" not in [b for m, b in blocked if m == "sendMessage"][0]
+
+
+def test_approve_button_places_exactly_that_ticket_once_and_removes_the_buttons(env):
+    mt5, svc = env
+    b = bot(svc)
+    ticket = b.handle_reply(ME, "/plan buy XAUUSD sl 4995 tp 5010").ticket_id
+    calls = _run_updates(svc, [_press(ME, f"ok:{ticket}"), _press(ME, f"ok:{ticket}", 3)], handler=b)
+    assert len(mt5.sent) == 1                                          # second tap placed nothing
+    texts = [body["text"] for m, body in calls if m == "sendMessage"]
+    assert texts[0].startswith("PLACED") and texts[1].startswith("NOT placed")
+    assert any(m == "editMessageReplyMarkup" and body["reply_markup"] == {"inline_keyboard": []} for m, body in calls)
+
+
+def test_reject_button_burns_the_ticket_so_a_later_yes_cannot_place_it(env):
+    mt5, svc = env
+    b = bot(svc)
+    ticket = b.handle_reply(ME, "/plan buy XAUUSD sl 4995 tp 5010").ticket_id
+    calls = _run_updates(svc, [_press(ME, f"no:{ticket}")], handler=b)
+    assert any("rejected" in body.get("text", "") for m, body in calls)
+    assert "NOT placed" in b.handle(ME, f"/yes {ticket}") and mt5.sent == []
+
+
+def test_a_strangers_button_press_does_nothing(env, capsys):
+    mt5, svc = env
+    b = bot(svc)
+    ticket = b.handle_reply(ME, "/plan buy XAUUSD sl 4995 tp 5010").ticket_id
+    calls = _run_updates(svc, [_press(STRANGER, f"ok:{ticket}")], handler=b)
+    assert mt5.sent == [] and [m for m, _ in calls] == ["answerCallbackQuery"]
+    assert "not allowed" in capsys.readouterr().out
+    assert b.handle(ME, f"/yes {ticket}").startswith("PLACED")        # the ticket was untouched
+
+
+@pytest.mark.parametrize("data", ["", "ok:", "ok", "zz:abc", "ok:nosuchticket"])
+def test_malformed_or_unknown_button_data_places_nothing(env, data):
+    mt5, svc = env
+    _run_updates(svc, [_press(ME, data)])
+    assert mt5.sent == []
