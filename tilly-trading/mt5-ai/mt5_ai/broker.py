@@ -168,6 +168,15 @@ class Mt5Broker:
                 ours += 1
         return {"realized": realized, "trades_ours": ours, "server_day": str(midnight.date())}
 
+    def close_reason(self, code: int) -> str:
+        m = self.mt5
+        names = {getattr(m, "DEAL_REASON_SL", 4): "hit its stop-loss", getattr(m, "DEAL_REASON_TP", 5): "hit its take-profit",
+                 getattr(m, "DEAL_REASON_EXPERT", 3): "closed by the bot (timer or close command)",
+                 getattr(m, "DEAL_REASON_SO", 6): "stopped out by the broker (margin)"}
+        for manual in ("DEAL_REASON_CLIENT", "DEAL_REASON_MOBILE", "DEAL_REASON_WEB"):
+            names.setdefault(getattr(m, manual, {"DEAL_REASON_CLIENT": 0, "DEAL_REASON_MOBILE": 1, "DEAL_REASON_WEB": 2}[manual]), "closed by hand")
+        return names.get(code, "closed")
+
     def position_outcomes(self, position_ids: list[int], days: int = 120) -> dict:
         """Net result and closed-flag per position id, from the broker's deal history."""
         if not position_ids:
@@ -185,6 +194,8 @@ class Mt5Broker:
             o["net"] += float(d.profit) + float(d.commission) + float(d.swap) + float(getattr(d, "fee", 0.0))
             if d.entry in (self.mt5.DEAL_ENTRY_OUT, self.mt5.DEAL_ENTRY_INOUT, self.mt5.DEAL_ENTRY_OUT_BY):
                 o["closed"] = True
+                o["close_price"] = float(getattr(d, "price", 0.0) or 0.0)
+                o["reason"] = self.close_reason(int(getattr(d, "reason", -1)))
         return out
 
     # --- requests -----------------------------------------------------------

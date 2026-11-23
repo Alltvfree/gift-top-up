@@ -55,6 +55,7 @@ class Mt5Service:
         self._expiry_path = Path(settings.state_dir) / "expiries.json"
         self._expiries: dict[int, dict] = self._load_expiries()   # position -> {"deadline": epoch, "tries": n}
         self._watchdog: threading.Thread | None = None
+        self._open_seen: dict[int, dict] | None = None     # our open positions at the last new_closes() call
 
     # --- audit log ----------------------------------------------------------
     def _log(self, event: str, **data) -> None:
@@ -300,6 +301,89 @@ class Mt5Service:
 
         self._watchdog = threading.Thread(target=loop, name="mt5-ai-timed-exits", daemon=True)
         self._watchdog.start()
+
+    # --- trade management ------------------------------------------------------------
+    def _risk_money_by_position(self) -> dict[int, float]:
+        from .journal import placed_trades, read_events
+
+        return {int(t["position"]): float(t["risk_money"]) for t in placed_trades(read_events(self._log_path)) if t["position"] and t["risk_money"]}
+
+    def position_cards(self) -> dict:
+        """Everything about each open position this server opened, in one place: live result, how many
+        R it is up or down, how long its timer has left, and what you can still do with it."""
+        risks, now = self._risk_money_by_position(), self._clock()
+        cards = []
+        for p in self.broker.positions():
+            if p["magic"] != self.s.magic:
+                continue
+            tk, spec = self.broker.tick(p["symbol"]), self.broker.spec(p["symbol"])
+            spread = tk["ask"] - tk["bid"]
+            price = tk["bid"] if p["side"] == "BUY" else tk["ask"]           # where it would close right now
+            be = p["price_open"] + spread if p["side"] == "BUY" else p["price_open"] - spread
+            beyond = price > be if p["side"] == "BUY" else price < be
+            already = (p["sl"] >= be) if p["side"] == "BUY" and p["sl"] else (p["sl"] <= be and p["sl"] > 0) if p["side"] == "SELL" else False
+            risk = risks.get(int(p["ticket"]))
+            exp = self._expiries.get(int(p["ticket"]))
+            cards.append({
+                "position": p["ticket"], "symbol": p["symbol"], "side": p["side"], "lots": p["volume"], "entry": p["price_open"],
+                "price_now": round(price, spec.digits), "stop_loss": p["sl"], "take_profit": p["tp"], "profit_now": round(p["profit"], 2),
+                "r_now": round(p["profit"] / risk, 2) if risk else None, "risk_at_stop": risk,
+                "timer_seconds_left": max(int(exp["deadline"] - now), 0) if exp else None,
+                "can_move_stop_to_breakeven": bool(beyond and not already), "breakeven_stop": round(be, spec.digits),
+            })
+        others = sum(1 for p in self.broker.positions() if p["magic"] != self.s.magic)
+        return {"positions": cards, "others_not_managed_here": others}
+
+    def move_to_breakeven(self, position_ticket: int) -> dict:
+        """Moves the stop to the entry price plus the spread, so the trade can no longer lose money. Only when
+        price is already beyond that level; never widens a stop."""
+        card = next((c for c in self.position_cards()["positions"] if c["position"] == position_ticket), None)
+        if card is None:
+            return {"moved": False, "error": f"No open position {position_ticket} opened by this server."}
+        if not card["can_move_stop_to_breakeven"]:
+            return {"moved": False, "error": "Not yet: price has to be beyond entry plus the spread first (or the stop is already there)."}
+        r = self.move_stop(position_ticket, card["breakeven_stop"])
+        return {**r, "breakeven_stop": card["breakeven_stop"]}
+
+    def cancel_timer(self, position_ticket: int) -> dict:
+        """Removes the exit timer. The trade then stays open until its stop or target hits (or you close it)."""
+        if int(position_ticket) not in self._expiries:
+            return {"cancelled": False, "error": "That position has no exit timer."}
+        self._expiries.pop(int(position_ticket))
+        self._save_expiries()
+        self._log("timer_cancelled", position=position_ticket)
+        return {"cancelled": True, "note": "It now closes only at its stop-loss or take-profit, or when you close it."}
+
+    def new_closes(self) -> list[dict]:
+        """Positions of ours that closed since the last call: result, R, and what closed them. The first call
+        only records what is open (no alerts for the past)."""
+        current = {p["ticket"]: p for p in self.broker.positions() if p["magic"] == self.s.magic}
+        risks = self._risk_money_by_position()
+        events: list[dict] = []
+        if self._open_seen is not None:
+            gone = [t for t in self._open_seen if t not in current]
+            outcomes = self.broker.position_outcomes(gone, days=3) if gone else {}
+            for t in gone:
+                info, o = self._open_seen[t], outcomes.get(t)
+                if o and o["closed"]:
+                    risk = risks.get(t) or info.get("risk")
+                    events.append({"position": t, "symbol": info["symbol"], "side": info["side"], "lots": info["volume"],
+                                   "net": round(o["net"], 2), "r": round(o["net"] / risk, 2) if risk else None,
+                                   "reason": o.get("reason", "closed"), "close_price": o.get("close_price")})
+        self._open_seen = {t: {"symbol": p["symbol"], "side": p["side"], "volume": p["volume"], "risk": risks.get(t)} for t, p in current.items()}
+        return events
+
+    def trade_context(self, symbol: str, side: str, sl: float, tp: float) -> dict:
+        """Reality check for a trade you are considering (see context.py). Read-only."""
+        from .context import assess
+
+        spec, tk = self.broker.spec(symbol), self.broker.tick(symbol)
+        side = side.upper()
+        entry = tk["ask"] if side == "BUY" else tk["bid"]
+        m5 = self.broker.rates(spec.symbol, "M5", 60)
+        typical = float(m5["spread"].median()) * spec.point if "spread" in m5 and len(m5) else 0.0
+        return assess(side, entry, sl, tp, m5=m5, m15=self.broker.rates(spec.symbol, "M15", 60), h1=self.broker.rates(spec.symbol, "H1", 80),
+                      spread_price=tk["ask"] - tk["bid"], typical_spread_price=typical, server_hour=tk["time"].hour)
 
     def journal_review(self, days: int = 120) -> dict:
         """How the trades this server placed actually ended, in R, overall and by tag."""

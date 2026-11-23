@@ -10,8 +10,8 @@ from mt5_ai.server import build_server
 from mt5_ai.service import Mt5Service
 
 READ_ONLY = {"account_overview", "symbol_details", "get_quote", "get_candles", "list_positions",
-             "list_pending_orders", "todays_summary", "journal_review", "kronos_forecast", "rule_setup_status", "simulate_trade_plan"}
-ORDER_TOOLS = {"place_prepared_trade", "move_stop", "close_position"}
+             "list_pending_orders", "todays_summary", "journal_review", "position_cards", "trade_context", "kronos_forecast", "rule_setup_status", "simulate_trade_plan"}
+ORDER_TOOLS = {"place_prepared_trade", "move_stop", "close_position", "move_to_breakeven", "cancel_timer"}
 
 
 def _server(tmp_path):

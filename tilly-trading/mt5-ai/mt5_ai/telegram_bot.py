@@ -35,11 +35,15 @@ import httpx
 from .llm import DEFAULT_MODELS, KEY_ENV, PROVIDERS, LLMError, complete
 
 MAX_MESSAGE = 3800
+POLL_SECONDS = 8        # long-poll length: also how quickly a closed-trade alert can arrive
+ALERT_EVERY = 8.0
 PLAN_USAGE = ("Usage: /plan buy|sell [SYMBOL] sl PRICE tp PRICE [risk PCT] [hold SECONDS] [tags a,b] [note TEXT...]\n"
               "Example: /plan buy XAUUSDm sl 3880 tp 3890 hold 90 tags style:scalp")
 HELP = ("Commands:\n"
         "/status  account, mode, limits\n"
         "/quote [SYMBOL]  live price\n"
+        "/panel  live panel: price, today, open trades with Close / Breakeven buttons\n"
+        "/ticket  show the latest waiting ticket again\n"
         "/positions  open positions\n"
         "/today  today's result and loss budget left\n"
         "/plan ...  prepare a ticket (sends NO order)\n"
@@ -75,6 +79,7 @@ class BotSettings:
     quick_hold: int = 90
     quick_rr: float = 2.0
     quick_stop: float | None = None     # price distance; None = automatic from spread and recent range
+    block_flags: int = 0                # refuse to prepare a ticket that has at least this many warning flags (0 = only warn)
 
     @classmethod
     def from_env(cls, env: dict | None = None) -> "BotSettings":
@@ -99,13 +104,17 @@ class BotSettings:
 
         return cls(token=token, allowed_ids=ids, symbol=e.get("MT5_AI_TELEGRAM_SYMBOL") or "XAUUSDm",
                    provider=provider, model=model, llm_key=key, quick_hold=num("MT5_AI_QUICK_HOLD", 90, int),
-                   quick_rr=num("MT5_AI_QUICK_RR", 2.0, float), quick_stop=num("MT5_AI_QUICK_STOP", None, float))
+                   quick_rr=num("MT5_AI_QUICK_RR", 2.0, float), quick_stop=num("MT5_AI_QUICK_STOP", None, float),
+                   block_flags=num("MT5_AI_QUICK_BLOCK_FLAGS", 0, int))
 
 
 BTN_BUY, BTN_SELL = "\U0001F7E2 BUY", "\U0001F534 SELL"
 BTN_QUOTE, BTN_STATUS, BTN_POS, BTN_HALT = "\U0001F4C8 Quote", "\U0001F4CA Status", "\U0001F4C2 Positions", "\U0001F6D1 Halt"
-BUTTON_COMMANDS = {BTN_BUY: "/buy", BTN_SELL: "/sell", BTN_QUOTE: "/quote", BTN_STATUS: "/status", BTN_POS: "/positions", BTN_HALT: "/halt"}
-MENU_KEYBOARD = {"keyboard": [[{"text": BTN_BUY}, {"text": BTN_SELL}], [{"text": BTN_QUOTE}, {"text": BTN_STATUS}, {"text": BTN_POS}], [{"text": BTN_HALT}]],
+BTN_PANEL, BTN_TICKET = "\U0001F9ED Panel", "\U0001F3AB Ticket"
+BUTTON_COMMANDS = {BTN_BUY: "/buy", BTN_SELL: "/sell", BTN_QUOTE: "/quote", BTN_STATUS: "/status", BTN_POS: "/positions", BTN_HALT: "/halt",
+                   BTN_PANEL: "/panel", BTN_TICKET: "/ticket"}
+MENU_KEYBOARD = {"keyboard": [[{"text": BTN_BUY}, {"text": BTN_SELL}], [{"text": BTN_PANEL}, {"text": BTN_TICKET}],
+                              [{"text": BTN_QUOTE}, {"text": BTN_STATUS}, {"text": BTN_POS}], [{"text": BTN_HALT}]],
                  "resize_keyboard": True, "is_persistent": True}
 QUICK_USAGE = "Usage: /buy or /sell [SYMBOL] [stop PRICE_DISTANCE] [rr RATIO] [hold SECONDS]"
 
@@ -115,6 +124,17 @@ class Reply:
     text: str
     ticket_id: str | None = None      # set when the text is a fresh ticket: the transport adds Approve/Reject buttons
     menu: bool = False                # show the BUY / SELL / Quote... keyboard
+    markup: dict | None = None        # explicit inline keyboard (the panel); wins over the ticket buttons
+
+
+@dataclass
+class Press:
+    """What a button press should do on screen."""
+    toast: str = ""                   # the small pop-up
+    send: str | None = None           # a new message
+    ticket_id: str | None = None      # ...that carries Approve/Reject
+    edit: tuple[str, dict] | None = None      # rewrite the message that held the button (text, inline keyboard)
+    clear_buttons: bool = False       # remove the buttons from that message
 
 
 def _kv(d: dict, skip=()) -> str:
@@ -157,12 +177,17 @@ def parse_plan(args: list[str], default_symbol: str) -> dict | str:
 
 class BotHandler:
     def __init__(self, service, allowed_ids, *, symbol: str = "XAUUSDm", llm: Callable[[str, str], str] | None = None,
-                 clock: Callable[[], float] = time.time, quick_hold: int = 90, quick_rr: float = 2.0, quick_stop: float | None = None):
+                 clock: Callable[[], float] = time.time, quick_hold: int = 90, quick_rr: float = 2.0, quick_stop: float | None = None,
+                 block_flags: int = 0):
         self.svc, self.allowed, self.symbol, self.llm, self.clock = service, frozenset(allowed_ids), symbol, llm, clock
         self.quick_hold, self.quick_rr, self.quick_stop = quick_hold, quick_rr, quick_stop
         self._last_llm = 0.0
+        self.block_flags = block_flags
         self._ticket_out: str | None = None
         self._menu_out = False
+        self._markup_out: dict | None = None
+        self._last_ticket: tuple[str, str] | None = None
+        self._budget_warned_day: str | None = None
 
     # ---------------------------------------------------------------- entry
     def handle(self, user_id: int, text: str) -> str | None:
@@ -171,9 +196,9 @@ class BotHandler:
 
     def handle_reply(self, user_id: int, text: str) -> Reply | None:
         """None means 'ignore silently' (not an allowed user)."""
-        self._ticket_out, self._menu_out = None, False
+        self._ticket_out, self._menu_out, self._markup_out = None, False, None
         out = self._handle(user_id, text)
-        return None if out is None else Reply(out, self._ticket_out, self._menu_out)
+        return None if out is None else Reply(out, self._ticket_out, self._menu_out, self._markup_out)
 
     def approve(self, user_id: int, ticket_id: str) -> str | None:
         """The Approve button. Same as /yes <id>: places exactly that ticket, once."""
@@ -188,6 +213,89 @@ class BotHandler:
         except Exception:  # noqa: BLE001 - already used or expired: nothing left to cancel
             return "That ticket was already used or has expired."
         return f"Ticket {ticket_id} rejected. Nothing was placed."
+
+    def press(self, user_id: int, data: str) -> Press | None:
+        """An inline-button press. None = not an allowed user (ignored silently)."""
+        if user_id not in self.allowed:
+            return None
+        action, _, arg = (data or "").partition(":")
+        try:
+            if action == "ok" and arg:
+                return Press(send=self.approve(user_id, arg), clear_buttons=True)
+            if action == "no" and arg:
+                return Press(send=self.reject(user_id, arg), clear_buttons=True)
+            if action == "rf":
+                return Press(toast="Refreshed", edit=self.panel())
+            if action == "qk" and arg in ("BUY", "SELL"):
+                self._ticket_out = None
+                text = self._quick(arg, [])
+                return Press(toast=f"{arg} ticket", send=text, ticket_id=self._ticket_out)
+            if action in ("cl", "be", "tm") and arg.isdigit():
+                pos = int(arg)
+                if action == "cl":
+                    r = self.svc.close_position(pos)
+                    msg = "Closed." if r.get("closed") else f"Not closed: {r.get('broker') or r}"
+                elif action == "be":
+                    r = self.svc.move_to_breakeven(pos)
+                    msg = f"Stop moved to breakeven ({r['breakeven_stop']})." if r.get("moved") else f"Not moved: {r.get('error') or r.get('broker')}"
+                else:
+                    r = self.svc.cancel_timer(pos)
+                    msg = r.get("note") if r.get("cancelled") else r.get("error")
+                return Press(toast=msg[:190], send=msg, edit=self.panel())
+        except Exception as exc:  # noqa: BLE001
+            return Press(toast="Error", send=f"Error: {type(exc).__name__}: {str(exc)[:300]}")
+        return Press(toast="Unknown button.")
+
+    # ---------------------------------------------------------------- panel and alerts
+    def panel(self) -> tuple[str, dict]:
+        """One screen with everything: price, today, each open trade and the buttons to manage it."""
+        q = self.svc.get_quote(self.symbol)
+        today = self.svc.todays_summary(self.symbol)
+        cards = self.svc.position_cards()
+        lines = [f"\U0001F9ED PANEL  {q['symbol']}  bid {q['bid']}  ask {q['ask']}  spread {q['spread_price']}",
+                 f"Today: {today['realized_pnl_all_strategies']:+.2f}   loss budget left {today['loss_budget_left']:.2f}   trades left {today['trades_left_today']}"]
+        rows = [[{"text": "\U0001F7E2 BUY", "callback_data": "qk:BUY"}, {"text": "\U0001F534 SELL", "callback_data": "qk:SELL"}],
+                [{"text": "\U0001F504 Refresh", "callback_data": "rf"}]]
+        if not cards["positions"]:
+            lines.append("No open trades.")
+        for c in cards["positions"]:
+            r = f" ({c['r_now']:+.2f}R)" if c["r_now"] is not None else ""
+            timer = f"  timer {c['timer_seconds_left']}s" if c["timer_seconds_left"] is not None else ""
+            lines.append(f"#{c['position']} {c['side']} {c['lots']:g} @ {c['entry']}  now {c['price_now']}  {c['profit_now']:+.2f}{r}\n"
+                         f"   stop {c['stop_loss']}  target {c['take_profit']}{timer}")
+            row = [{"text": f"\u274c Close #{c['position']}", "callback_data": f"cl:{c['position']}"}]
+            if c["can_move_stop_to_breakeven"]:
+                row.append({"text": "\U0001F6E1 Breakeven", "callback_data": f"be:{c['position']}"})
+            if c["timer_seconds_left"] is not None:
+                row.append({"text": "\u23F1 Cancel timer", "callback_data": f"tm:{c['position']}"})
+            rows.append(row)
+        if cards["others_not_managed_here"]:
+            lines.append(f"({cards['others_not_managed_here']} other open position(s) not opened by this bot; manage those in MT5.)")
+        lines.append(f"Updated {q['server_time'][11:19]} server time")
+        return "\n".join(lines), {"inline_keyboard": rows}
+
+    def alerts(self) -> list[str]:
+        """Messages the bot should push on its own: trades that closed, and a low loss budget (once a day)."""
+        out = []
+        for e in self.svc.new_closes():
+            icon = "\u2705" if e["net"] > 0 else "\u274c" if e["net"] < 0 else "\u2796"
+            r = f" ({e['r']:+.2f}R)" if e["r"] is not None else ""
+            out.append(f"{icon} Closed #{e['position']} {e['side']} {e['lots']:g} {e['symbol']}: {e['reason']}.\nResult {e['net']:+.2f}{r}")
+        try:
+            t = self.svc.todays_summary(self.symbol)
+            limit = -t["daily_loss_limit"]
+            if limit > 0 and t["loss_budget_left"] <= 0.25 * limit and self._budget_warned_day != t["server_day"]:
+                self._budget_warned_day = t["server_day"]
+                out.append(f"\u26A0 Loss budget is nearly used: {t['loss_budget_left']:.2f} left of {limit:.2f} today. Consider stopping for the day.")
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
+    def _heads_up(self, symbol: str, side: str, sl: float, tp: float) -> dict:
+        try:
+            return self.svc.trade_context(symbol, side, sl, tp)
+        except Exception:  # noqa: BLE001 - the checks are advice; they must never stop a ticket from being prepared
+            return {"flags": [], "notes": [], "h1_trend": "unknown"}
 
     def _handle(self, user_id: int, text: str) -> str | None:
         if user_id not in self.allowed:
@@ -211,6 +319,15 @@ class BotHandler:
             return "Menu on. Tap BUY or SELL to prepare a ticket from the live price, then Approve to place it.\n\n" + HELP
         if cmd == "/help":
             return HELP
+        if cmd == "/panel":
+            text, markup = self.panel()
+            self._markup_out = markup
+            return text
+        if cmd == "/ticket":
+            if self._last_ticket and self.svc.tickets.is_open(self._last_ticket[0]):
+                self._ticket_out = self._last_ticket[0]
+                return self._last_ticket[1]
+            return "No ticket is waiting (it may have expired). Tap BUY or SELL for a fresh one."
         if cmd in ("/buy", "/sell"):
             return self._quick(cmd[1:].upper(), args)
         if cmd == "/status":
@@ -277,12 +394,22 @@ class BotHandler:
                 + self._prepare(q["symbol"], side, sl, tp, None, f"quick {side.lower()} from the Telegram button", "style:quick", hold))
 
     def _prepare(self, symbol, side, sl, tp, risk_pct, note, tags, hold) -> str:
+        ctx = self._heads_up(symbol, side, sl, tp)
+        flags = ctx["flags"]
+        if self.block_flags and len(flags) >= self.block_flags:
+            return ("NOT PREPARED - too many warning flags (" + str(len(flags)) + "):\n- " + "\n- ".join(ctx["notes"])
+                    + "\n(Your limit is set by MT5_AI_QUICK_BLOCK_FLAGS. Wait for better conditions, or set the number higher.)")
+        tags = ",".join(x for x in [tags, *[f"flag:{f.replace('_', '-')}" for f in flags]] if x)
         r = self.svc.prepare_trade(symbol, side, sl, tp, risk_pct, note, tags, hold)
         if r["verdict"] != "PASS":
             return "BLOCKED - nothing was prepared:\n- " + "\n- ".join(r["reasons"])
         self._ticket_out = r["ticket_id"]
-        return (r["ticket"] + (f"\n  exits by timer after {hold}s" if hold else "")
+        heads = ("\n\n\u26A0 Heads-up (context, not a forecast):\n- " + "\n- ".join(ctx["notes"])) if ctx["notes"] else ""
+        text = (r["ticket"] + (f"\n  exits by timer after {hold}s" if hold else "")
+                + f"\n  hourly trend: {ctx['h1_trend']}" + heads
                 + f"\n\nTap Approve to place exactly this ticket, or send /yes {r['ticket_id']}\n(Expires in {r['expires_in_seconds']}s. Ignore it or tap Reject to cancel.)")
+        self._last_ticket = (r["ticket_id"], text)
+        return text
 
     def _yes(self, args: list[str]) -> str:
         if len(args) != 1:
@@ -304,6 +431,8 @@ class BotHandler:
         self._last_llm = now
         snap = {"account": self.svc.account_overview(), "today": self.svc.todays_summary(self.symbol),
                 "quote": self.svc.get_quote(self.symbol),
+                "open_positions": self.svc.position_cards()["positions"],
+                "journal_overall": self.svc.journal_review()["overall"],
                 "m15_candles_oldest_first": self.svc.get_candles(self.symbol, "M15", 24)["rows"]}
         try:
             reply = self.llm(SYSTEM_PROMPT, f"SNAPSHOT:\n{json.dumps(snap, default=str)}\n\nQUESTION:\n{question[:1500]}")
@@ -339,12 +468,14 @@ def run(settings: BotSettings, handler: BotHandler, *, client: httpx.Client | No
     def call(method: str, **payload):
         return client.post(f"{api}/{method}", json=payload)
 
-    def send(chat_id, text, ticket_id=None, menu=False):
+    def send(chat_id, text, ticket_id=None, menu=False, markup=None):
         parts = list(_chunks(text)) or ["(empty)"]
         for i, part in enumerate(parts):
             extra = {}
             if i == len(parts) - 1:
-                if ticket_id:
+                if markup:
+                    extra = {"reply_markup": markup}
+                elif ticket_id:
                     extra = {"reply_markup": _keyboard(ticket_id)}
                 elif menu:
                     extra = {"reply_markup": MENU_KEYBOARD}
@@ -358,26 +489,42 @@ def run(settings: BotSettings, handler: BotHandler, *, client: httpx.Client | No
         if reply is None:
             print(f"ignored a message from a user id that is not allowed: {uid}", flush=True)
             return
-        send(m["chat"]["id"], reply.text, reply.ticket_id, reply.menu)
+        send(m["chat"]["id"], reply.text, reply.ticket_id, reply.menu, reply.markup)
 
     def on_button(q: dict) -> None:
         uid = (q.get("from") or {}).get("id")
         msg = q.get("message") or {}
-        action, _, ticket_id = (q.get("data") or "").partition(":")
-        text = None
-        if (msg.get("chat") or {}).get("type") == "private" and action in ("ok", "no") and ticket_id:
-            text = handler.approve(uid, ticket_id) if action == "ok" else handler.reject(uid, ticket_id)
-        call("answerCallbackQuery", callback_query_id=q.get("id"))
-        if text is None:
+        chat = msg.get("chat") or {}
+        res = handler.press(uid, q.get("data") or "") if chat.get("type") == "private" else None
+        call("answerCallbackQuery", callback_query_id=q.get("id"), **({"text": res.toast} if res and res.toast else {}))
+        if res is None:
             print(f"ignored a button press from a user id that is not allowed: {uid}", flush=True)
             return
-        if msg.get("message_id"):      # remove the buttons so they cannot be pressed twice
-            call("editMessageReplyMarkup", chat_id=msg["chat"]["id"], message_id=msg["message_id"], reply_markup={"inline_keyboard": []})
-        send(msg["chat"]["id"], text)
+        mid, cid = msg.get("message_id"), chat.get("id")
+        if res.clear_buttons and mid:      # remove the buttons so they cannot be pressed twice
+            call("editMessageReplyMarkup", chat_id=cid, message_id=mid, reply_markup={"inline_keyboard": []})
+        if res.edit and mid:
+            call("editMessageText", chat_id=cid, message_id=mid, text=res.edit[0][:MAX_MESSAGE], reply_markup=res.edit[1])
+        if res.send:
+            send(cid, res.send, res.ticket_id)
+
+    last_alert = 0.0
+
+    def push_alerts() -> None:
+        nonlocal last_alert
+        if time.time() - last_alert < ALERT_EVERY:
+            return
+        last_alert = time.time()
+        try:
+            for text in handler.alerts():
+                for uid in settings.allowed_ids:      # a private chat's id equals the user's id
+                    send(uid, text)
+        except Exception as exc:  # noqa: BLE001 - alerts are best-effort; never kill the loop
+            print(f"alert check failed ({type(exc).__name__})", flush=True)
 
     while not stop():
         try:
-            r = client.post(f"{api}/getUpdates", json={"offset": offset, "timeout": 30, "allowed_updates": ["message", "callback_query"]})
+            r = client.post(f"{api}/getUpdates", json={"offset": offset, "timeout": POLL_SECONDS, "allowed_updates": ["message", "callback_query"]})
             if r.status_code != 200:
                 raise httpx.HTTPError(f"HTTP {r.status_code}")
             for u in r.json().get("result", []):
@@ -387,6 +534,7 @@ def run(settings: BotSettings, handler: BotHandler, *, client: httpx.Client | No
                 elif u.get("message"):
                     on_message(u["message"])
             backoff = 1.0
+            push_alerts()
         except (httpx.HTTPError, ValueError) as exc:
             # The URL (which holds the token) is deliberately NOT printed.
             print(f"telegram connection problem ({type(exc).__name__}); retrying in {backoff:.0f}s", flush=True)
@@ -405,7 +553,7 @@ def main() -> None:
         provider, model, key = s.provider, s.model, s.llm_key
         llm = lambda system, user: complete(provider, model, system, user, api_key=key)  # noqa: E731
     run(s, BotHandler(make_service(), s.allowed_ids, symbol=s.symbol, llm=llm,
-                      quick_hold=s.quick_hold, quick_rr=s.quick_rr, quick_stop=s.quick_stop))
+                      quick_hold=s.quick_hold, quick_rr=s.quick_rr, quick_stop=s.quick_stop, block_flags=s.block_flags))
 
 
 if __name__ == "__main__":

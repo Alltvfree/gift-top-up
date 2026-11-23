@@ -75,6 +75,26 @@ def build_server(service: Mt5Service) -> FastMCP:
         return await run(service.todays_summary, symbol)
 
     @mcp.tool(annotations=_READ)
+    async def trade_context(symbol: str, side: str, sl: float, tp: float) -> dict:
+        """A pre-trade reality check, not a forecast: flags if the trade goes against the hourly trend, the spread is wide, the stop is inside normal noise, the target needs a new 12-hour extreme, or it is a thin hour. Use it before prepare_trade and quote the flags to the person."""
+        return await run(service.trade_context, symbol, side, sl, tp)
+
+    @mcp.tool(annotations=_READ)
+    async def position_cards() -> dict:
+        """Every open position this server opened, with live profit/loss, how many R it is up or down, its exit-timer seconds left, and whether its stop can be moved to breakeven. Positions opened any other way are only counted, never managed."""
+        return await run(service.position_cards)
+
+    @mcp.tool(annotations=_ORDER)
+    async def move_to_breakeven(position_ticket: int) -> dict:
+        """Move one of this server's stops to entry plus the spread, so the trade cannot lose. Only works once price is already beyond that level; never widens a stop."""
+        return await run(service.move_to_breakeven, position_ticket)
+
+    @mcp.tool(annotations=_ORDER)
+    async def cancel_timer(position_ticket: int) -> dict:
+        """Remove the exit timer from one position, so it stays open until its stop-loss or take-profit hits."""
+        return await run(service.cancel_timer, position_ticket)
+
+    @mcp.tool(annotations=_READ)
     async def journal_review(days: int = 120) -> dict:
         """The trade journal: how the trades this server placed actually ended, in R (profit over money risked), overall and by tag, with confidence ranges and a plain reading. Says 'too few trades' until there are 30+ closed trades."""
         return await run(service.journal_review, days)

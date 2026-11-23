@@ -21,6 +21,7 @@ class FakeMT5:
     ORDER_FILLING_FOK, ORDER_FILLING_IOC, ORDER_FILLING_RETURN = 0, 1, 2
     DEAL_TYPE_BUY, DEAL_TYPE_SELL, DEAL_TYPE_BALANCE = 0, 1, 2
     DEAL_ENTRY_IN, DEAL_ENTRY_OUT, DEAL_ENTRY_INOUT, DEAL_ENTRY_OUT_BY = 0, 1, 2, 3
+    DEAL_REASON_CLIENT, DEAL_REASON_MOBILE, DEAL_REASON_WEB, DEAL_REASON_EXPERT, DEAL_REASON_SL, DEAL_REASON_TP, DEAL_REASON_SO = 0, 1, 2, 3, 4, 5, 6
     TRADE_RETCODE_PLACED, TRADE_RETCODE_DONE = 10008, 10009
 
     _TF_MINUTES = {1: 1, 5: 5, 15: 15, 30: 30, 16385: 60, 16388: 240, 16408: 1440}
@@ -97,9 +98,9 @@ class FakeMT5:
     def history_deals_get(self, start, end):
         return tuple(self.deals)
 
-    def add_deal(self, *, entry, profit=0.0, magic=0, seconds_ago=60, dtype=0, commission=0.0, position_id=0):
+    def add_deal(self, *, entry, profit=0.0, magic=0, seconds_ago=60, dtype=0, commission=0.0, position_id=0, reason=0, price=0.0):
         self.deals.append(NS(time=self.now - seconds_ago, type=dtype, entry=entry, profit=profit, commission=commission,
-                             swap=0.0, fee=0.0, magic=magic, position_id=position_id))
+                             swap=0.0, fee=0.0, magic=magic, position_id=position_id, reason=reason, price=price))
 
     def add_position(self, *, side="BUY", volume=0.19, price_open=5000.0, sl=4995.0, tp=5010.0, magic=26110001):
         p = NS(ticket=next(self._tickets), symbol=self.symbol_name, type=self.POSITION_TYPE_BUY if side == "BUY" else self.POSITION_TYPE_SELL,

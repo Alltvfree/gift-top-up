@@ -21,8 +21,8 @@ holds its own login; the server just attaches to it.
    environment variables (`MT5_AI_*`, see README); defaults are demo-only,
    gold-only, 1% risk, 3 trades/day, 3% daily loss, 1 open position.
 3. **Permissions** (Customize > Connectors > mt5): read-only and compute tools
-   may be Always allow. Set `place_prepared_trade`, `move_stop` and
-   `close_position` to **Needs approval**, never Always allow. `halt_trading`
+   may be Always allow. Set `place_prepared_trade`, `move_stop`, `move_to_breakeven`,
+   `cancel_timer` and `close_position` to **Needs approval**, never Always allow. `halt_trading`
    is safe to leave allowed. Claude Code: put order tools under `ask`, never `allow`.
 4. Verify: call `account_overview`. Confirm `mode` is DEMO and the symbol list
    matches Market Watch (gold is `XAUUSD` on real accounts, `XAUUSDm` on mini).

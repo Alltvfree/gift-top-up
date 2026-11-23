@@ -28,3 +28,7 @@ description: >-
 ## Journal review
 
 Call `journal_review` to see how placed trades actually ended, in R, overall and by tag. Report its `reading` fields as written: with fewer than 30 closed trades it says "too few", and you must not call any tag or setup "working" on that basis. Remind the person that with many tags, one will look good by chance.
+
+## Managing open trades
+
+Call `position_cards` first: it shows each open position with live profit, how many R it is up or down, its timer, and whether the stop can go to breakeven. Use `move_to_breakeven` once a trade is already clearly in profit, and `close_position` to get out. `cancel_timer` only makes a trade stay open longer, so use it only when the person asks.

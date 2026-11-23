@@ -56,6 +56,11 @@ class TicketStore:
         self._open[t.id] = t
         return t
 
+    def is_open(self, ticket_id: str) -> bool:
+        """True if the ticket can still be placed (not used, not expired). Does not consume it."""
+        t = self._open.get((ticket_id or "").strip().upper())
+        return t is not None and t.expires > self._clock()
+
     def take(self, ticket_id: str) -> Ticket:
         """Removes and returns the ticket: it can be sent once, ever. A failed
         send does not give it back — prepare a fresh one."""

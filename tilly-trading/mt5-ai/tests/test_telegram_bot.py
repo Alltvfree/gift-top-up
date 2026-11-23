@@ -354,3 +354,13 @@ def test_quick_settings_come_from_the_environment():
     assert (s.quick_hold, s.quick_rr, s.quick_stop) == (60, 2.5, 1.8)
     d = BotSettings.from_env({"MT5_AI_TELEGRAM_TOKEN": "t", "MT5_AI_TELEGRAM_ALLOWED_IDS": "1"})
     assert (d.quick_hold, d.quick_rr, d.quick_stop) == (90, 2.0, None)
+
+
+# --- panel over the wire ---------------------------------------------------------------------------------------
+def test_panel_command_sends_its_own_inline_keyboard_and_refresh_edits_in_place(env):
+    mt5, svc = env
+    calls = _run_updates(svc, [_msg(ME, "/panel", 1), _press(ME, "rf", 2)])
+    sent = [b for m, b in calls if m == "sendMessage"][0]
+    assert "PANEL" in sent["text"] and sent["reply_markup"]["inline_keyboard"][1][0]["callback_data"] == "rf"
+    edit = [b for m, b in calls if m == "editMessageText"][0]
+    assert "PANEL" in edit["text"] and edit["message_id"] == 11 and mt5.sent == []

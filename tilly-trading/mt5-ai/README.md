@@ -116,3 +116,15 @@ at the same time; both read the same HALT file and the broker's own trade counts
 BUY/SELL build a ticket from the live price: stop = the larger of 6x the spread and the recent M5 range,
 target = rr x stop, exit timer = hold seconds. Override per tap with `/buy stop 2 rr 2.5 hold 60`, or set defaults with
 `MT5_AI_QUICK_STOP`, `MT5_AI_QUICK_RR` (default 2), `MT5_AI_QUICK_HOLD` (default 90). The ticket still needs Approve.
+
+### Managing trades (Telegram, Claude Desktop and the AI chat all use the same layer)
+
+- **Panel** (`/panel` or the Panel button): live price, today's result and loss budget, and each open trade with its profit,
+  R, timer and buttons: **Close**, **Breakeven** (stop to entry + spread, only once price is beyond it), **Cancel timer**.
+- **Alerts** the bot sends by itself: a trade closed (result, R, and whether stop, target, timer or you ended it), and a warning
+  once a day when the loss budget is nearly gone.
+- **Ticket** button: shows the latest waiting ticket again, with Approve / Reject, while it is still valid.
+- **Pre-trade flags** on every ticket (`context.py`): against the hourly trend, wide spread, stop inside normal noise, target needs
+  a new 12-hour extreme, thin hours. Context, not a forecast. They are logged as `flag:` tags, so `/journal` can show whether flagged
+  trades did worse. `MT5_AI_QUICK_BLOCK_FLAGS=2` refuses tickets with 2+ flags (default 0 = warn only).
+- MCP tools for Claude Desktop: `position_cards`, `move_to_breakeven`, `cancel_timer`, `trade_context`.

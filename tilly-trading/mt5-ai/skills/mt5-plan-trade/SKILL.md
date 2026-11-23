@@ -37,3 +37,8 @@ When you call `prepare_trade`, pass `tags` as a short comma-separated label set 
 ## Fast in-and-out trades
 
 For a quick scalp, read M1/M5 candles (`get_candles` with `timeframe` M1), keep the stop at least 5x the spread (the server blocks a spread above 20% of the stop), and pass `max_hold_seconds` to `prepare_trade` (e.g. 60-300) so the server closes the position at market when time is up if the stop/target have not hit. Tag it `style:scalp` so the journal keeps scalps separate. The timer only runs while Claude Desktop is open; the broker-side stop and target always remain.
+
+
+## Check the context before preparing
+
+Call `trade_context` with the side, stop and target you are about to use, and quote its flags to the person in plain words (going against the hourly trend, wide spread, stop inside normal noise, target beyond the 12-hour range, thin hours). It is a reality check, not a forecast: say so. A flagged trade is allowed, but the person should hear the flags before they say yes. Tag the plan with the flags (e.g. `flag:against-h1-trend`) so `journal_review` can later show whether flagged trades did worse.
