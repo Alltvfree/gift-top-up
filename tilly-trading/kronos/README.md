@@ -474,3 +474,10 @@ stricter breakout-plus-pullback version (`gabfx_snr3`). Where the ebook is vague
 documented in the module. Its sizing/"deposit big" advice is deliberately not used.
 
     python -m backtest.compare_setups --config config\setup_xauusd_h1.toml --symbol XAUUSDm --only gabfx_snr2,gabfx_snr3
+
+### Does the Telegram quick-ticket make money? (`setups/quick.py`, `config/setup_xauusd_m1.toml`)
+
+Tests the BUY/SELL ticket geometry on one-minute bars (stop = max(6 x spread, 5-minute range), target 2x stop, ~90 s exit),
+choosing the side three ways: with the hourly trend, against it, or at random. Daily limits are off in this config on purpose.
+
+    python -m backtest.compare_setups --config config\setup_xauusd_m1.toml --symbol XAUUSDm --bars 60000 --only quick_trend,quick_counter,quick_random --null 2 --out reports\compare_quick.csv
