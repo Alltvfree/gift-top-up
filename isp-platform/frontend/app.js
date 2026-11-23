@@ -254,8 +254,9 @@ const PAGES = {
       d.vendor === 'mikrotik' ? btn('Generate firewall', 'go', {href: `#/security?device=${id}`}) : '',
       d.vendor === 'huawei' && d.role === 'olt' ? btn('ONT autofind', 'olt-autofind', {id}, 'primary') : '',
       d.vendor === 'huawei' && d.role === 'olt' ? btn('Restore ONTs onto another OLT', 'olt-restore', {id}) : '',
-      ['huawei', 'ubiquiti'].includes(d.vendor) && d.parent_name ? ((d.settings || {}).via_router ? btn('Connect directly', 'olt-access', {id, via: ''})
+      ['huawei', 'ubiquiti', 'encoder'].includes(d.vendor) && d.parent_name ? ((d.settings || {}).via_router ? btn('Connect directly', 'olt-access', {id, via: ''})
         : btn(`Reach through ${d.parent_name}`, 'olt-access', {id, via: '1', router: d.parent_name})) : '',
+      d.vendor === 'encoder' ? btn('Encoder dashboard', 'go', {href: `#/encoderview/${id}`}, 'primary') : '',
       can('approve') ? btn('Delete', 'device-del', {id}, 'danger') : ''].join('') : '';
     const exportBtn = d.vendor === 'huawei' && d.role === 'olt' ? `<a class="btn small" href="/api/olt/${val(id)}/export" download>Download ONT list (CSV)</a>` : '';
     const m = d.metrics[0] || {};
@@ -331,6 +332,61 @@ const PAGES = {
         net ? btn(r.control === 'deactivated' ? 'Enable' : 'Disable', 'ont-state', {id: oid, active: r.control === 'deactivated' ? '1' : '', name: r.description || r.serial}, r.control === 'deactivated' ? '' : 'danger') : ''].join(' ')]],
       {empty: 'No ONTs match. The list fills after the first OLT poll.'}) + pager,
       `<a class="btn small" href="/api/olt/${val(id)}/export" download>Download CSV</a>`, `${list.total} ONTs`);
+  }},
+
+  encoders: {title: 'Video encoders', group: 'INFRASTRUCTURE', nav: '🎥 Video encoders', perm: 'read', async render() {
+    const [sm, rows] = await Promise.all([api('/api/encoders/overview'), api('/api/encoders')]);
+    const cards = `<div class="cards cards-6">
+      <div class="card"><div class="label">Total</div><div class="value">${esc(sm.total)}</div></div>
+      <div class="card"><div class="label">Online</div><div class="value s-ok">${esc(sm.online)}</div></div>
+      <div class="card"><div class="label">Offline</div><div class="value s-critical">${esc(sm.offline)}</div></div>
+      <div class="card"><div class="label">Video failures</div><div class="value ${sm.video_failures ? 's-critical' : ''}">${esc(sm.video_failures)}</div></div>
+      <div class="card"><div class="label">Audio failures</div><div class="value ${sm.audio_failures ? 's-warning' : ''}">${esc(sm.audio_failures)}</div></div>
+      <div class="card"><div class="label">Recoveries today</div><div class="value">${esc(sm.recoveries_today)}</div></div></div>`;
+    return panel('Video encoders', cards) +
+      panel(`Encoders (${rows.length})`, table(rows, [['name', 'Name'], ['island_name', 'Island'], ['status', 'Status', tag],
+        ['video_failing', 'Video', v => v ? '<span class="s-critical">failing</span>' : '<span class="s-ok">ok</span>'],
+        ['audio_failing', 'Audio', v => v ? '<span class="s-warning">silent</span>' : '<span class="s-ok">ok</span>'],
+        ['parent_name', 'Via router', v => esc(v || '—')], ['last_seen_at', 'Seen', ago]],
+        {href: r => `#/encoderview/${r.id}`, empty: 'Add one under Devices (vendor Video encoder).'}),
+        can('network') ? btn('Add device', 'device-edit', {}, 'primary') : '');
+  }},
+
+  encoderview: {title: 'Encoder', hidden: true, perm: 'read', async render(q, id) {
+    const d = await api(`/api/encoders/${id}`);
+    const net = can('network');
+    const auto = (d.settings || {}).auto_recovery;
+    const adapter = (d.settings || {}).restart_adapter;
+    const acts = net ? [btn('Test now', 'encoder-test', {id}, 'primary'),
+      btn(auto ? 'Disable auto-recovery' : 'Enable auto-recovery', 'encoder-recovery', {id, on: auto ? '' : '1'}),
+      btn('Manual restart', 'encoder-restart', {id, configured: adapter && adapter.verified ? '1' : ''}, 'danger'),
+      btn('Edit', 'device-edit', {id})].join('') : '';
+    const openVideo = d.incidents.find(i => i.kind === 'video' && !i.closed_at);
+    const openAudio = d.incidents.find(i => i.kind === 'audio' && !i.closed_at);
+    const last = (d.recent_checks[0] || {}).encoder || {};
+    // The card's headline reflects the LAST check (immediate); an open incident is the debounced,
+    // consecutive-failure signal used for alerting/recovery -- shown as a separate note so a single
+    // bad check still shows as failing here without waiting for the incident threshold.
+    const lastVideoOk = last.video ? last.video.ok : null;
+    const lastAudioOk = last.audio ? last.audio.ok : null;
+    return panel(d.name, `<p class="muted">${esc(d.management_ip || '')}${d.parent_name ? esc(` via ${d.parent_name}`) : ''} · ${tag(d.status)} · seen ${ago(d.last_seen_at)}</p>
+      <div class="cards cards-3">
+        <div class="card"><div class="label">Video</div><div class="value ${lastVideoOk === false ? 's-critical' : lastVideoOk === true ? 's-ok' : ''}">${lastVideoOk === false ? 'FAILING' : lastVideoOk === true ? 'OK' : '—'}</div>
+          <div class="note">${esc((last.video || {}).codec || '')} ${esc((last.video || {}).reason || '')}${openVideo ? ' · incident open' : ''}</div></div>
+        <div class="card"><div class="label">Audio</div><div class="value ${lastAudioOk === false ? 's-warning' : lastAudioOk === true ? 's-ok' : ''}">${lastAudioOk === false ? 'SILENT' : lastAudioOk === true ? 'OK' : '—'}</div>
+          <div class="note">${last.audio && last.audio.mean_db != null ? esc(`${last.audio.mean_db} dB`) : esc((last.audio || {}).reason || '')}${openAudio ? ' · incident open' : ''}</div></div>
+        <div class="card"><div class="label">Auto-recovery</div><div class="value">${auto ? '<span class="s-ok">on</span>' : '<span class="muted">off</span>'}</div>
+          <div class="note">${adapter ? (adapter.verified ? 'restart adapter verified' : 'adapter set, NOT verified') : 'no restart adapter configured'}</div></div>
+      </div>${d.last_poll_error ? `<div class="error">${esc(d.last_poll_error)}</div>` : ''}`, acts) +
+      panel('Open incidents', table(d.incidents.filter(i => !i.closed_at), [['kind', 'Kind', tag], ['opened_at', 'Opened', dt],
+        ['diagnosis', 'Diagnosis', v => esc((v || {}).reason || JSON.stringify(v))]], {empty: 'None open.'})) +
+      panel('Recent checks', table(d.recent_checks.slice(0, 30), [['at', 'When', dt],
+        ['encoder', 'Video', v => v ? (v.video.ok ? '<span class="s-ok">ok</span>' : `<span class="s-critical">${esc(v.video.reason || 'failing')}</span>`) : '—'],
+        ['encoder', 'Audio', v => v ? (v.audio.ok ? `<span class="s-ok">${v.audio.mean_db != null ? esc(v.audio.mean_db) + ' dB' : 'ok'}</span>` : `<span class="s-warning">${esc(v.audio.reason || 'failing')}</span>`) : '—']],
+        {empty: 'Not checked yet.'})) +
+      panel('Incident history', table(d.incidents, [['kind', 'Kind', tag], ['severity', 'Sev', tag], ['opened_at', 'Opened', dt],
+        ['closed_at', 'Closed', dt], ['closed_reason', 'Closed by', v => esc(v || '')],
+        ['recovery_action', 'Recovery', v => esc(v || '')], ['recovery_result', 'Result', v => esc(v || '')]], {empty: 'No incidents yet.'}));
   }},
 
   threats: {title: 'Threat protection', group: 'INFRASTRUCTURE', nav: '⛔ Threat protection', perm: 'read', async render(q) {
@@ -648,15 +704,15 @@ const ACTIONS = {
     modal(`<h2>${d.id ? 'Edit' : 'Add'} device</h2>` + form('device', fields([
       ['name', 'Name', 'text', {required: true}], ['island_id', 'Island', 'select', {options: none('— core / none —').concat(islands)}],
       ['parent_device_id', 'Upstream device (for an OLT: its PPPoE NAS / island MikroTik)', 'select', {options: none('—').concat(devices.filter(x => x[0] !== d.id))}],
-      ['vendor', 'Vendor', 'select', {options: [['mikrotik', 'MikroTik'], ['huawei', 'Huawei'], ['ubiquiti', 'Ubiquiti (airFiber)'], ['other', 'Other']]}],
-      ['role', 'Role', 'select', {options: [['island_router', 'Island router'], ['core_router', 'Core router'], ['olt', 'OLT'], ['backhaul', 'Backhaul radio'], ['radius', 'RADIUS'], ['other', 'Other']]}],
+      ['vendor', 'Vendor', 'select', {options: [['mikrotik', 'MikroTik'], ['huawei', 'Huawei'], ['ubiquiti', 'Ubiquiti (airFiber)'], ['encoder', 'Video encoder'], ['other', 'Other']]}],
+      ['role', 'Role', 'select', {options: [['island_router', 'Island router'], ['core_router', 'Core router'], ['olt', 'OLT'], ['backhaul', 'Backhaul radio'], ['video_encoder', 'Video encoder'], ['radius', 'RADIUS'], ['other', 'Other']]}],
       ['management_ip', 'Management IP', 'text'], ['mgmt_port', 'Mgmt port (REST 443 / SSH 22)', 'number'], ['model', 'Model', 'text'],
       ['cred_username', 'Login username', 'text', {placeholder: d.id && dev.has_credentials ? 'stored — leave blank to keep' : ''}],
       ['cred_password', 'Login password', 'password', {placeholder: d.id && dev.has_credentials ? 'stored — leave blank to keep' : ''}],
       ['cred_snmp', 'SNMP community (airFiber, or a MikroTik monitored by SNMP: leave login empty)', 'password', {placeholder: d.id && dev.has_credentials ? 'stored — leave blank to keep' : ''}],
       ['ssh_host_key', 'Pinned SSH host key (OLT)', 'text', {placeholder: 'SHA256:...'}],
       ['poll_enabled', 'Monitor this device', 'check'],
-      ['settings', 'Settings JSON (optional) — OLT with several frames: {"frames":[0,1]} · MikroTik with both login and SNMP, poll by SNMP: {"poll":"snmp"} · backups: {"backup_interval_hours":6} (0 disables scheduled) or {"backup_after_change":false}', 'json'], ['notes', 'Notes', 'textarea']], dev), 'Save', {id: d.id || ''}));
+      ['settings', 'Settings JSON (optional) — OLT with several frames: {"frames":[0,1]} · MikroTik with both login and SNMP, poll by SNMP: {"poll":"snmp"} · backups: {"backup_interval_hours":6} (0 disables scheduled) or {"backup_after_change":false} · video encoder: {"rtsp_port":554,"rtsp_path":"/stream1","audio_threshold_db":-50}', 'json'], ['notes', 'Notes', 'textarea']], dev), 'Save', {id: d.id || ''}));
   },
   async 'device-poll'(d) { toast('Polling…'); const r = await api(`/api/devices/${d.id}/poll`, 'POST'); toast(`Poll done: ${JSON.stringify(r)}`); reload(); },
   async 'device-backup'(d) {
@@ -740,6 +796,28 @@ const ACTIONS = {
         ['frame', 'Frame', 'number', {default: d.frame ?? 0}], ['slot', 'Slot', 'number', {required: true, default: d.slot}], ['port', 'PON port', 'number', {required: true, default: d.port}],
         ['ont_id', 'ONT ID (blank = next free)', 'number'], ['line_profile_id', 'ont-lineprofile-id', 'number', {required: true}],
         ['service_profile_id', 'ont-srvprofile-id', 'number', {required: true}], ['vlan', 'Service VLAN', 'number', {required: true}], ['gemport', 'GEM port', 'number', {default: 1}]]), 'Create change request'));
+  },
+  async 'encoder-test'(d) {
+    toast('Checking video + audio…');
+    const r = await api(`/api/encoders/${d.id}/test`, 'POST');
+    toast(`Video ${r.video.ok ? 'ok' : 'FAILING: ' + (r.video.reason || '')} · Audio ${r.audio.ok ? (r.audio.mean_db != null ? r.audio.mean_db + ' dB' : 'ok') : 'SILENT: ' + (r.audio.reason || '')}`,
+         !(r.video.ok && r.audio.ok));
+    reload();
+  },
+  async 'encoder-recovery'(d) {
+    await api(`/api/encoders/${d.id}/recovery`, 'PUT', {auto_recovery: !!d.on});
+    toast(d.on ? 'Auto-recovery enabled' : 'Auto-recovery disabled'); reload();
+  },
+  async 'encoder-restart'(d) {
+    if (!d.configured) {
+      toast('No verified restart method configured for this encoder yet — set settings.restart_adapter (with verified: true) after testing it manually.', true);
+      return;
+    }
+    if (!confirmAct('Restart this encoder now? Video/audio will drop for a short time.')) return;
+    toast('Restarting…');
+    try { await api(`/api/encoders/${d.id}/restart`, 'POST', {confirm: true}); toast('Restart sent'); }
+    catch (e) { toast(e.message, true); }
+    reload();
   },
   async 'ont-reboot'(d) {
     if (!confirmAct(`Reboot ONT ${d.name} now? The customer is offline for about 2 minutes.`)) return;

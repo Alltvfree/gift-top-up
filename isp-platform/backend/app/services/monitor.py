@@ -13,7 +13,7 @@ from ..adapters.mikrotik_snmp import MikroTikSNMP
 from ..adapters.ping import ping, tcp_ping
 from ..security import decrypt_json
 from . import devices as dev
-from . import olt_access, telegram, threats
+from . import encoders, olt_access, telegram, threats
 
 log = logging.getLogger(__name__)
 
@@ -33,8 +33,10 @@ def poll_device(device: dict, with_olt: bool = False) -> dict:
         return {**m, "error": "no management IP"}
     if (device.get("settings") or {}).get("via_router") and device["vendor"] == "ubiquiti":
         return poll_radio_via_router(device, m)
-    if (device.get("settings") or {}).get("via_router"):
-        m.update(tcp_ping(*olt_access.endpoint(device)))  # OLT behind its island router: no ICMP path
+    if (device.get("settings") or {}).get("via_router") or device["vendor"] == "encoder":
+        # OLT/encoder behind its island router: no ICMP path. An encoder's real "network" question
+        # is whether its RTSP port answers at all, so check that directly even when reached direct.
+        m.update(tcp_ping(*olt_access.endpoint(device)))
     else:
         m.update(ping(str(device["management_ip"])))
     if not m["reachable"]:
@@ -66,6 +68,12 @@ def poll_device(device: dict, with_olt: bool = False) -> dict:
                 r = airfiber.poll(str(device["management_ip"]), community)
                 m["uptime_s"] = r["uptime_s"]
                 m["extra"].update(r["extra"])
+        elif device["vendor"] == "encoder":
+            r = encoders.check(device)
+            m["extra"]["encoder"] = r
+            problems = [f"{k}: {v['reason']}" for k, v in r.items() if not v.get("ok")]
+            if problems:
+                m["error"] = "; ".join(problems)[:300]
         elif device["vendor"] == "huawei" and device["role"] == "olt" and with_olt and device.get("credentials_enc"):
             r = poll_olt(device)
             m["extra"]["onts"] = r["onts"]
@@ -166,6 +174,8 @@ def store(conn, device: dict, m: dict):
         store_onts(conn, device, onts)
     if m.get("security"):
         threats.record_events(conn, device, *m["security"])
+    if device["vendor"] == "encoder" and "encoder" in extra:
+        encoders.evaluate(conn, device, extra["encoder"])
     return status
 
 

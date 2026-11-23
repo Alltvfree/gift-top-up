@@ -102,5 +102,26 @@ Never leave the community as `public`, and allow it only from the platform's add
   registration only (ont add + service-port): it never touches PPPoE/WAN on the ONT, so a customer whose own
   router already dials PPPoE is undisturbed.
 
-## 5. Alerts
+## 5. IP video encoders
+* Add the encoder as *vendor Video encoder, role Video encoder*. Set its management IP; if it sits on an
+  island's LAN, set **Upstream device** to that island's MikroTik and click **Reach through <router>** on
+  its device page, same as an OLT.
+* Settings JSON: `{"rtsp_port":554,"rtsp_path":"/stream1","audio_threshold_db":-50,"audio_fail_checks":3,
+  "video_fail_checks":1,"max_reboots_per_hour":2,"reboot_cooldown_min":5}`. If the encoder's RTSP stream
+  needs a login, store it as the device's own username/password (not in the URL).
+* Every poll: ffprobe opens the stream (video layer) and, if an audio track exists, ffmpeg decodes a few
+  seconds and measures its level with `volumedetect` (audio layer) — a silent-but-present audio track is
+  caught, not just "packets are arriving". A failure needs the configured number of **consecutive** bad
+  polls before an incident opens, so one blip doesn't page anyone.
+* **Restart is never automatic by default**, and the platform will not guess a vendor's restart URL.
+  Identify the device's actual make/model, inspect its web UI, find the real restart request, and test it
+  by hand first. Once you know it works, set it on the device:
+  `settings.restart_adapter = {"type":"http","method":"POST","url":"http://<encoder>/<real path>",
+  "basic_auth":["user","pass"],"verified":true}`. Until `verified` is `true`, both **Manual restart** and
+  auto-recovery refuse to run, and the incident just sits there for a human.
+* *Video encoders* lists every encoder with live video/audio status; its detail page has **Test now**
+  (runs the check immediately), **Manual restart**, an **auto-recovery** on/off switch, and full
+  incident history.
+
+## 6. Alerts
 Set `ALERT_WEBHOOK_URL` to any endpoint that accepts `{"text": "..."}` (Slack/Mattermost/Teams, or a small Telegram/Viber bridge).

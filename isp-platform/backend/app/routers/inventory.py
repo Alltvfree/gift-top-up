@@ -78,8 +78,8 @@ class DeviceIn(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     island_id: UUID | None = None
     parent_device_id: UUID | None = None
-    vendor: Literal["mikrotik", "huawei", "ubiquiti", "other"]
-    role: Literal["core_router", "island_router", "olt", "backhaul", "radius", "other"]
+    vendor: Literal["mikrotik", "huawei", "ubiquiti", "encoder", "other"]
+    role: Literal["core_router", "island_router", "olt", "backhaul", "video_encoder", "radius", "other"]
     management_ip: IPv4Address | None = None
     mgmt_port: int | None = Field(default=None, ge=1, le=65535)
     model: str | None = Field(default=None, max_length=80)

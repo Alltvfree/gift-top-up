@@ -1,8 +1,8 @@
 FROM python:3.12-slim
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 MIGRATIONS_DIR=/app/migrations
-# ping for reachability, snmpget for airFiber radios
-RUN apt-get update && apt-get install -y --no-install-recommends iputils-ping snmp \
+# ping for reachability, snmpget for airFiber radios, ffmpeg/ffprobe for video encoder checks
+RUN apt-get update && apt-get install -y --no-install-recommends iputils-ping snmp ffmpeg \
     && rm -rf /var/lib/apt/lists/* && useradd --system --uid 10001 app
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

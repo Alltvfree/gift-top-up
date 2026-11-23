@@ -15,6 +15,7 @@ Monitoring, configuration, billing and RADIUS for an island ISP:
 | SMS (MessageOwl) | Automatic invoice / reminder / payment / suspended / restored messages (editable templates), one-off SMS, outage notices to a whole island in bulk, full message log. |
 | Import from DMA | CSV import of subscribers and NAS from DMA Radius Manager with a dry-run preview; imported customers stay billed by DMA until switched over ([docs/MIGRATE-FROM-DMA.md](docs/MIGRATE-FROM-DMA.md)). |
 | Smart OLT | All OLTs at a glance; per-OLT dashboard (waiting authorization, online/offline, good/acceptable/weak/bad signal) with a filterable ONT list (port, status, signal, description/serial/account search); per-ONT live signal, read config, reboot, enable/disable (audited); autofind + provisioning as reviewed changes. Parser verified against real MA5608T output. |
+| Video encoders | Reaches an encoder's RTSP stream directly or through its island router; checks video (ffprobe) and audio (ffmpeg, actually decoded and measured — packet arrival alone proves nothing) every poll. Opens an incident only after N consecutive failures (configurable per device), closes it on recovery, alerts (portal + Telegram). Manual restart and an opt-in auto-recovery exist, but both refuse to run until an admin configures *and marks verified* a real, manually-tested restart method for that model — nothing here ever guesses an undocumented endpoint. |
 
 ## Layout
 ```

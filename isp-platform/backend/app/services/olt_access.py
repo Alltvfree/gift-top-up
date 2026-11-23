@@ -1,4 +1,5 @@
-"""Reach an OLT (SSH) or an airFiber radio (SNMP) through its island MikroTik ("Upstream device").
+"""Reach an OLT (SSH), an airFiber radio (SNMP) or a video encoder (RTSP) through its island
+MikroTik ("Upstream device").
 
 OLTs sit on the island router's local network (e.g. 10.11.104.2 behind NEILAIDHOO-GPON), which the
 platform often has no route to. With access via router the platform adds two NAT rules on that
@@ -19,7 +20,8 @@ from . import devices as dev
 COMMENT = "isp-olt-fwd:"
 PORTS = range(22101, 22200)
 # vendor -> (protocol, service port on the device, forward ports on the router)
-SERVICES = {"huawei": ("tcp", 22, PORTS), "ubiquiti": ("udp", 161, range(16101, 16200))}
+SERVICES = {"huawei": ("tcp", 22, PORTS), "ubiquiti": ("udp", 161, range(16101, 16200)),
+            "encoder": ("tcp", 554, range(15401, 15500))}
 
 
 class AccessError(Exception):
@@ -59,7 +61,7 @@ def plan(nat_rules: list[dict], olt_id: str, router_ip: str, olt_ip: str, src: s
         f'/ip firewall nat add chain=srcnat action=masquerade protocol={proto} src-address={src} dst-address={olt_ip} '
         f'dst-port={target_port} comment="{tag} masquerade"',
         f'/ip firewall nat add chain=dstnat action=dst-nat protocol={proto} src-address={src} dst-address={router_ip} '
-        f'dst-port={port} to-addresses={olt_ip} to-ports={target_port} comment="{tag} {"ssh" if target_port == 22 else "snmp"}"',
+        f'dst-port={port} to-addresses={olt_ip} to-ports={target_port} comment="{tag} {"ssh" if target_port == 22 else "snmp" if target_port == 161 else "rtsp"}"',
     ))
     return port, [r[".id"] for r in ours], script
 
@@ -67,7 +69,7 @@ def plan(nat_rules: list[dict], olt_id: str, router_ip: str, olt_ip: str, src: s
 def _load(conn, olt_id):
     olt = conn.execute("SELECT * FROM devices WHERE id=%s", (olt_id,)).fetchone()
     if not olt or olt["vendor"] not in SERVICES:
-        raise AccessError("Only Huawei OLTs and Ubiquiti radios can be reached through a router")
+        raise AccessError("Only Huawei OLTs, Ubiquiti radios and video encoders can be reached through a router")
     if not olt["management_ip"]:
         raise AccessError("Set the device's management IP (its local IP behind the router) first")
     router = conn.execute("SELECT * FROM devices WHERE id=%s", (olt["parent_device_id"],)).fetchone() if olt["parent_device_id"] else None
@@ -118,4 +120,6 @@ def endpoint(device: dict) -> tuple[str, int]:
         return s["forward_host"], int(s["forward_port"])
     if device.get("vendor") == "ubiquiti":
         return str(device["management_ip"]), 161
+    if device.get("vendor") == "encoder":
+        return str(device["management_ip"]), int((device.get("settings") or {}).get("rtsp_port", 554))
     return str(device["management_ip"]), device.get("mgmt_port") or 22
