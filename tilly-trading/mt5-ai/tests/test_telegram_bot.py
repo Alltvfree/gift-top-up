@@ -298,7 +298,7 @@ def test_buy_button_builds_a_ticket_from_the_live_price_and_places_nothing(env):
     mt5, svc = env                                     # fake: bid 5000.00, ask 5000.25, M5 ranges 4.0
     r = bot(svc).handle_reply(ME, BTN_BUY)
     assert r.ticket_id and "TICKET" in r.text and mt5.sent == []
-    assert "stop 4.00 away" in r.text and "exit timer 90s" in r.text
+    assert "stop 4.00 away" in r.text and "exit timer 300s" in r.text
     assert "stop-loss 4996.25" in r.text and "take-profit 5008.25" in r.text      # ask -4, +2x4 on the other side
 
 
@@ -353,7 +353,7 @@ def test_quick_settings_come_from_the_environment():
                               "MT5_AI_QUICK_RR": "2.5", "MT5_AI_QUICK_STOP": "1.8"})
     assert (s.quick_hold, s.quick_rr, s.quick_stop) == (60, 2.5, 1.8)
     d = BotSettings.from_env({"MT5_AI_TELEGRAM_TOKEN": "t", "MT5_AI_TELEGRAM_ALLOWED_IDS": "1"})
-    assert (d.quick_hold, d.quick_rr, d.quick_stop) == (90, 2.0, None)
+    assert (d.quick_hold, d.quick_rr, d.quick_stop, d.quick_spread_mult) == (300, 2.0, None, 15.0)
 
 
 # --- panel over the wire ---------------------------------------------------------------------------------------
@@ -364,3 +364,14 @@ def test_panel_command_sends_its_own_inline_keyboard_and_refresh_edits_in_place(
     assert "PANEL" in sent["text"] and sent["reply_markup"]["inline_keyboard"][1][0]["callback_data"] == "rf"
     edit = [b for m, b in calls if m == "editMessageText"][0]
     assert "PANEL" in edit["text"] and edit["message_id"] == 11 and mt5.sent == []
+
+
+def test_automatic_stop_is_at_least_fifteen_spreads_by_default_and_the_multiple_is_configurable(env):
+    mt5, svc = env
+    mt5.ask = mt5.bid + 0.5                                   # spread 0.5: 15 x = 7.5, wider than the 4.0 range
+    out = bot(svc).handle(ME, "/buy")
+    assert "stop 7.50 away" in out
+    tight = BotHandler(svc, {ME}, symbol="XAUUSD", quick_spread_mult=6.0)
+    assert "stop 4.00 away" in tight.handle(ME, "/buy")
+    s = BotSettings.from_env({"MT5_AI_TELEGRAM_TOKEN": "t", "MT5_AI_TELEGRAM_ALLOWED_IDS": "1", "MT5_AI_QUICK_SPREAD_MULT": "10"})
+    assert s.quick_spread_mult == 10.0

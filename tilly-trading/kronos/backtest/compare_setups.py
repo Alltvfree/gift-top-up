@@ -26,11 +26,12 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from setups.gabfx import gabfx_snr2, gabfx_snr3  # noqa: E402
-from setups.quick import quick_counter, quick_random, quick_trend  # noqa: E402
+from setups.quick import (quick15_counter, quick15_random, quick15_trend, quick_counter, quick_random, quick_trend)  # noqa: E402
 from setups.library import STRATEGIES, confluence  # noqa: E402
 
 STRATEGIES = {**STRATEGIES, "gabfx_snr2": gabfx_snr2, "gabfx_snr3": gabfx_snr3,
-              "quick_trend": quick_trend, "quick_counter": quick_counter, "quick_random": quick_random}
+              "quick_trend": quick_trend, "quick_counter": quick_counter, "quick_random": quick_random,
+              "quick15_trend": quick15_trend, "quick15_counter": quick15_counter, "quick15_random": quick15_random}
 
 from .account import Account  # noqa: E402
 from .config import BacktestConfig, load_config  # noqa: E402

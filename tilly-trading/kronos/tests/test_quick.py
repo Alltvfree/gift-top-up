@@ -64,3 +64,14 @@ def test_compare_runs_the_three_quick_setups_on_one_minute_data():
     df = make_synthetic_ohlc(9000, freq="1min", start_time="2024-01-02 00:00", seed=8)
     table = compare(df, None, cfg, spec, min_trades=500, n_null=0, only=["quick_trend", "quick_counter", "quick_random"])
     assert list(table["setup"]) == ["quick_trend", "quick_counter", "quick_random"] and (table["trades"] > 10).all()
+
+
+def test_fifteen_spread_variants_have_wider_stops_and_the_slow_config_holds_five_bars():
+    from setups.quick import quick15_trend
+    df = trending()
+    wide, narrow = quick15_trend(df, POINT), quick_trend(df, POINT)
+    fired = wide["setup_buy"]
+    assert (wide.loc[fired, "signal_sl_distance"] >= 15 * 24 * POINT - 1e-9).all()
+    assert wide.loc[fired, "signal_sl_distance"].mean() > narrow.loc[narrow["setup_buy"], "signal_sl_distance"].mean()
+    cfg = load_config("config/setup_xauusd_m1_slow.toml")
+    assert cfg.execution.max_holding_bars == 5 and cfg.signal.cooldown_bars == 10

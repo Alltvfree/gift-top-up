@@ -76,7 +76,8 @@ class BotSettings:
     provider: str | None = None
     model: str | None = None
     llm_key: str | None = field(default=None, repr=False)
-    quick_hold: int = 90
+    quick_hold: int = 300
+    quick_spread_mult: float = 15.0     # automatic stop = at least this many spreads: wider stop, spread is a smaller share of the risk
     quick_rr: float = 2.0
     quick_stop: float | None = None     # price distance; None = automatic from spread and recent range
     block_flags: int = 0                # refuse to prepare a ticket that has at least this many warning flags (0 = only warn)
@@ -103,7 +104,7 @@ class BotSettings:
             return cast(raw) if raw else default
 
         return cls(token=token, allowed_ids=ids, symbol=e.get("MT5_AI_TELEGRAM_SYMBOL") or "XAUUSDm",
-                   provider=provider, model=model, llm_key=key, quick_hold=num("MT5_AI_QUICK_HOLD", 90, int),
+                   provider=provider, model=model, llm_key=key, quick_hold=num("MT5_AI_QUICK_HOLD", 300, int), quick_spread_mult=num("MT5_AI_QUICK_SPREAD_MULT", 15.0, float),
                    quick_rr=num("MT5_AI_QUICK_RR", 2.0, float), quick_stop=num("MT5_AI_QUICK_STOP", None, float),
                    block_flags=num("MT5_AI_QUICK_BLOCK_FLAGS", 0, int))
 
@@ -177,12 +178,13 @@ def parse_plan(args: list[str], default_symbol: str) -> dict | str:
 
 class BotHandler:
     def __init__(self, service, allowed_ids, *, symbol: str = "XAUUSDm", llm: Callable[[str, str], str] | None = None,
-                 clock: Callable[[], float] = time.time, quick_hold: int = 90, quick_rr: float = 2.0, quick_stop: float | None = None,
-                 block_flags: int = 0):
+                 clock: Callable[[], float] = time.time, quick_hold: int = 300, quick_rr: float = 2.0, quick_stop: float | None = None,
+                 block_flags: int = 0, quick_spread_mult: float = 15.0):
         self.svc, self.allowed, self.symbol, self.llm, self.clock = service, frozenset(allowed_ids), symbol, llm, clock
         self.quick_hold, self.quick_rr, self.quick_stop = quick_hold, quick_rr, quick_stop
         self._last_llm = 0.0
         self.block_flags = block_flags
+        self.quick_spread_mult = quick_spread_mult
         self._ticket_out: str | None = None
         self._menu_out = False
         self._markup_out: dict | None = None
@@ -385,9 +387,9 @@ class BotHandler:
         q = self.svc.get_quote(symbol)
         digits = self.svc.broker.spec(q["symbol"]).digits
         entry = q["ask"] if side == "BUY" else q["bid"]
-        if stop is None:   # at least 6x the spread (the server blocks a spread above 20% of the stop), else the recent M5 range
+        if stop is None:   # at least N spreads (default 15; the server itself blocks above 5), else the recent M5 range
             rows = self.svc.get_candles(q["symbol"], "M5", 12)["rows"]
-            stop = max(6 * q["spread_price"], sum(r[2] - r[3] for r in rows) / max(len(rows), 1))
+            stop = max(self.quick_spread_mult * q["spread_price"], sum(r[2] - r[3] for r in rows) / max(len(rows), 1))
         sign = 1 if side == "BUY" else -1
         sl, tp = round(entry - sign * stop, digits), round(entry + sign * rr * stop, digits)
         return (f"Quick {side} {q['symbol']} at about {entry}: stop {stop:.{digits}f} away, target {rr:g}x that, exit timer {hold}s.\n\n"
@@ -553,7 +555,7 @@ def main() -> None:
         provider, model, key = s.provider, s.model, s.llm_key
         llm = lambda system, user: complete(provider, model, system, user, api_key=key)  # noqa: E731
     run(s, BotHandler(make_service(), s.allowed_ids, symbol=s.symbol, llm=llm,
-                      quick_hold=s.quick_hold, quick_rr=s.quick_rr, quick_stop=s.quick_stop, block_flags=s.block_flags))
+                      quick_hold=s.quick_hold, quick_rr=s.quick_rr, quick_stop=s.quick_stop, block_flags=s.block_flags, quick_spread_mult=s.quick_spread_mult))
 
 
 if __name__ == "__main__":

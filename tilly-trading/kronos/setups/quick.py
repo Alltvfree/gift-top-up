@@ -68,3 +68,9 @@ def quick_signals(df: pd.DataFrame, point: float, p: QuickParams | None = None) 
 def quick_trend(df, point): return quick_signals(df, point, QuickParams(mode="trend"))        # noqa: E704
 def quick_counter(df, point): return quick_signals(df, point, QuickParams(mode="counter"))    # noqa: E704
 def quick_random(df, point): return quick_signals(df, point, QuickParams(mode="random"))      # noqa: E704
+
+
+# The bot's new defaults: stop >= 15 spreads, ~5-minute hold (use setup_xauusd_m1_slow.toml: max_holding_bars = 5).
+def quick15_trend(df, point): return quick_signals(df, point, QuickParams(mode="trend", spread_mult=15.0))        # noqa: E704
+def quick15_counter(df, point): return quick_signals(df, point, QuickParams(mode="counter", spread_mult=15.0))    # noqa: E704
+def quick15_random(df, point): return quick_signals(df, point, QuickParams(mode="random", spread_mult=15.0))      # noqa: E704
