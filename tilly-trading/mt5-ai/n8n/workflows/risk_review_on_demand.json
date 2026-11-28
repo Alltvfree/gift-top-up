@@ -1,0 +1,269 @@
+{
+  "name": "MT5 risk review on demand (AI, veto-only)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "72301df2-c87e-5e05-a662-f080c4dcbeda",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "symbol",
+              "value": "XAUUSDm",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "side",
+              "value": "BUY",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "sl",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "a4",
+              "name": "tp",
+              "value": 0,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "114a74e7-b360-5ed7-901c-c08bb7b74ec2",
+      "name": "Set the trade to review",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:8765/bundle",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.symbol }}"
+            },
+            {
+              "name": "side",
+              "value": "={{ $json.side }}"
+            },
+            {
+              "name": "sl",
+              "value": "={{ $json.sl }}"
+            },
+            {
+              "name": "tp",
+              "value": "={{ $json.tp }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "b1e1532c-7b88-5368-94ac-b7d886a343b0",
+      "name": "GET bundle",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "mt5-ai token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Change MODEL to one your Anthropic key can use. The rules below are the agent's hard limits (see n8n/prompts).\nconst MODEL = 'claude-sonnet-5-5';\nconst SYSTEM = `# Risk reviewer (agent prompt)\n\nUsed by \\`risk_review_on_demand.json\\`. A VETO-ONLY reviewer: it can warn or advise skipping a trade; it can never approve one.\n\n**Role.** Challenge a trade the person is considering, using the bundle the bot provides (pre-trade flags, today's loss budget, open positions, recent journal results, live quote).\n\n**Rules (hard):**\n- Use ONLY the data in the bundle. If something is missing, say it is missing.\n- Start with a one-line verdict: \\`SKIP\\`, \\`CAUTION\\` or \\`NO OBJECTION\\`. \\`NO OBJECTION\\` never means \"good trade\" and never means \"approved\"; say that the approval is the human's, in Telegram.\n- Explain each warning flag in plain words and say what it costs.\n- Point out any risk the numbers show: spread share of the stop, loss budget nearly used, an open position already, a losing streak in the journal, a stop smaller than normal noise.\n- Never suggest a bigger size, a wider risk limit, or a different direction. Never predict where price is going; say no tested strategy has shown a proven edge if asked whether it will win.\n- 150 words or fewer.\n\n**Input:** JSON \\`bundle\\` from \\`GET /bundle\\` plus the planned side, stop and target.\n`;\nconst plan = $('Set the trade to review').first().json;\nconst USER = JSON.stringify({ planned: plan, bundle: $json });\nreturn [{ json: { model: MODEL, system: SYSTEM, user: USER } }];\n"
+      },
+      "id": "7ba0e3e2-0ced-5c69-8c8c-cdaac4131124",
+      "name": "Build prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $json.model, max_tokens: 900, system: $json.system, messages: [{ role: 'user', content: $json.user }] }) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "c0c3bbbd-e81f-538d-af6e-69f7dc8d6283",
+      "name": "Ask the AI (Anthropic)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "anthropic key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst blocks = $json.content || [];\nconst text = blocks.map(b => b.text || '').join('').trim();\nreturn [{ json: { text: '\ud83e\udde0 ' + (text || '(the AI returned no text)') } }];\n"
+      },
+      "id": "5b87c0e8-d0ae-5851-b6f6-8c313b16dc22",
+      "name": "Extract text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8765/notify",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}",
+        "options": {}
+      },
+      "id": "3012491e-8fbe-547b-b209-5727bfc8db2f",
+      "name": "POST notify to Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "mt5-ai token"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Set the trade to review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set the trade to review": {
+      "main": [
+        [
+          {
+            "node": "GET bundle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET bundle": {
+      "main": [
+        [
+          {
+            "node": "Build prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build prompt": {
+      "main": [
+        [
+          {
+            "node": "Ask the AI (Anthropic)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask the AI (Anthropic)": {
+      "main": [
+        [
+          {
+            "node": "Extract text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract text": {
+      "main": [
+        [
+          {
+            "node": "POST notify to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "note": "Edit the Set node (symbol, side, sl, tp), then run. The reviewer can warn or say SKIP; it cannot approve or place anything."
+  }
+}

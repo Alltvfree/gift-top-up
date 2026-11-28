@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import re
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Callable
@@ -190,7 +192,16 @@ class BotHandler:
         self._markup_out: dict | None = None
         self._last_ticket: tuple[str, str] | None = None
         self._budget_warned_day: str | None = None
+        self.lock = threading.RLock()                       # the bot thread and the automation API share this handler
+        self.outbox: "queue.Queue[tuple[str, str | None]]" = queue.Queue(maxsize=50)   # messages other code wants sent to the user
 
+    def push(self, text: str, ticket_id: str | None = None) -> bool:
+        """Queue a message for every allowed user (a ticket gets its Approve / Reject buttons). False if the queue is full."""
+        try:
+            self.outbox.put_nowait((text, ticket_id))
+            return True
+        except queue.Full:
+            return False
     # ---------------------------------------------------------------- entry
     def handle(self, user_id: int, text: str) -> str | None:
         r = self.handle_reply(user_id, text)
@@ -198,9 +209,10 @@ class BotHandler:
 
     def handle_reply(self, user_id: int, text: str) -> Reply | None:
         """None means 'ignore silently' (not an allowed user)."""
-        self._ticket_out, self._menu_out, self._markup_out = None, False, None
-        out = self._handle(user_id, text)
-        return None if out is None else Reply(out, self._ticket_out, self._menu_out, self._markup_out)
+        with self.lock:
+            self._ticket_out, self._menu_out, self._markup_out = None, False, None
+            out = self._handle(user_id, text)
+            return None if out is None else Reply(out, self._ticket_out, self._menu_out, self._markup_out)
 
     def approve(self, user_id: int, ticket_id: str) -> str | None:
         """The Approve button. Same as /yes <id>: places exactly that ticket, once."""
@@ -218,6 +230,10 @@ class BotHandler:
 
     def press(self, user_id: int, data: str) -> Press | None:
         """An inline-button press. None = not an allowed user (ignored silently)."""
+        with self.lock:
+            return self._press(user_id, data)
+
+    def _press(self, user_id: int, data: str) -> Press | None:
         if user_id not in self.allowed:
             return None
         action, _, arg = (data or "").partition(":")
@@ -278,6 +294,10 @@ class BotHandler:
 
     def alerts(self) -> list[str]:
         """Messages the bot should push on its own: trades that closed, and a low loss budget (once a day)."""
+        with self.lock:
+            return self._alerts()
+
+    def _alerts(self) -> list[str]:
         out = []
         for e in self.svc.new_closes():
             icon = "\u2705" if e["net"] > 0 else "\u274c" if e["net"] < 0 else "\u2796"
@@ -510,6 +530,15 @@ def run(settings: BotSettings, handler: BotHandler, *, client: httpx.Client | No
         if res.send:
             send(cid, res.send, res.ticket_id)
 
+    def drain_outbox() -> None:
+        while True:
+            try:
+                text, ticket_id = handler.outbox.get_nowait()
+            except queue.Empty:
+                return
+            for uid in settings.allowed_ids:
+                send(uid, text, ticket_id)
+
     last_alert = 0.0
 
     def push_alerts() -> None:
@@ -536,6 +565,7 @@ def run(settings: BotSettings, handler: BotHandler, *, client: httpx.Client | No
                 elif u.get("message"):
                     on_message(u["message"])
             backoff = 1.0
+            drain_outbox()
             push_alerts()
         except (httpx.HTTPError, ValueError) as exc:
             # The URL (which holds the token) is deliberately NOT printed.
@@ -554,8 +584,15 @@ def main() -> None:
             raise SystemExit(f"AI chat is enabled but {KEY_ENV[s.provider]} is not set on this machine.")
         provider, model, key = s.provider, s.model, s.llm_key
         llm = lambda system, user: complete(provider, model, system, user, api_key=key)  # noqa: E731
-    run(s, BotHandler(make_service(), s.allowed_ids, symbol=s.symbol, llm=llm,
-                      quick_hold=s.quick_hold, quick_rr=s.quick_rr, quick_stop=s.quick_stop, block_flags=s.block_flags, quick_spread_mult=s.quick_spread_mult))
+    handler = BotHandler(make_service(), s.allowed_ids, symbol=s.symbol, llm=llm,
+                      quick_hold=s.quick_hold, quick_rr=s.quick_rr, quick_stop=s.quick_stop, block_flags=s.block_flags, quick_spread_mult=s.quick_spread_mult)
+    if (os.environ.get("MT5_AI_API_TOKEN") or "").strip():
+        from .automation_api import start_in_thread
+
+        host, port = os.environ.get("MT5_AI_API_HOST") or "127.0.0.1", int(os.environ.get("MT5_AI_API_PORT") or 8765)
+        start_in_thread(handler, os.environ["MT5_AI_API_TOKEN"].strip(), host, port)
+        print(f"automation API for n8n listening on {host}:{port} (bearer token required; it cannot place or close trades)", flush=True)
+    run(s, handler)
 
 
 if __name__ == "__main__":

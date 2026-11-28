@@ -1,0 +1,205 @@
+{
+  "name": "MT5 daily report",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 21 * * *"
+            }
+          ]
+        }
+      },
+      "id": "3ab320d4-e1a2-5fff-8e89-fe06dd83c131",
+      "name": "Every day 21:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:8765/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "0b45b470-6177-57e4-8966-ef317178e6e1",
+      "name": "GET status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "mt5-ai token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:8765/positions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fded2da6-6190-5f8f-8dbc-b633ce3e2d6b",
+      "name": "GET positions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "mt5-ai token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:8765/journal",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "cf93cc65-76ed-5bda-b9ea-b5315360921c",
+      "name": "GET journal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "mt5-ai token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst st = $('GET status').first().json;\nconst pos = $('GET positions').first().json;\nconst j = $('GET journal').first().json;\nconst L = [];\nL.push('\ud83d\udccb Daily report');\nL.push(`Account ${st.account.account} (${st.account.mode}) | balance ${st.account.balance} | equity ${st.account.equity}`);\nL.push(`Today ${st.today.realized_pnl_all_strategies} | loss budget left ${st.today.loss_budget_left} | trades left ${st.today.trades_left_today}`);\nif (pos.positions.length === 0) { L.push('No open trades.'); }\nfor (const p of pos.positions) {\n  L.push(`#${p.position} ${p.side} ${p.lots} ${p.symbol} now ${p.price_now} | ${p.profit_now}` + (p.r_now !== null ? ` (${p.r_now}R)` : ''));\n}\nconst o = j.overall || {};\nL.push(o.trades ? `Journal: ${o.trades} closed, win rate ${o.win_rate}, mean ${o.mean_r}R. ${o.reading}` : 'Journal: no closed trades yet.');\nreturn [{ json: { text: L.join('\\n') } }];\n"
+      },
+      "id": "8a02f8b2-6cef-542b-8086-7de0dda1eb75",
+      "name": "Build report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8765/notify",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}",
+        "options": {}
+      },
+      "id": "3012491e-8fbe-547b-b209-5727bfc8db2f",
+      "name": "POST notify to Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "mt5-ai token"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every day 21:00": {
+      "main": [
+        [
+          {
+            "node": "GET status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET status": {
+      "main": [
+        [
+          {
+            "node": "GET positions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET positions": {
+      "main": [
+        [
+          {
+            "node": "GET journal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET journal": {
+      "main": [
+        [
+          {
+            "node": "Build report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build report": {
+      "main": [
+        [
+          {
+            "node": "POST notify to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "note": "Read-only: reads the account and sends a summary to Telegram through the bot. Places nothing."
+  }
+}

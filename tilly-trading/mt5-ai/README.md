@@ -128,3 +128,9 @@ target = rr x stop, exit timer = hold seconds. Override per tap with `/buy stop 
   a new 12-hour extreme, thin hours. Context, not a forecast. They are logged as `flag:` tags, so `/journal` can show whether flagged
   trades did worse. `MT5_AI_QUICK_BLOCK_FLAGS=2` refuses tickets with 2+ flags (default 0 = warn only).
 - MCP tools for Claude Desktop: `position_cards`, `move_to_breakeven`, `cancel_timer`, `trade_context`.
+
+### n8n automation (`n8n/`, `mt5_ai/automation_api.py`)
+
+A local, token-protected API inside the bot lets n8n read the account, send reports and create tickets (which still need Approve in
+Telegram). It has no endpoint that places, closes or modifies an order. Starter workflows: daily report, weekly AI journal review, veto-only
+AI risk reviewer. See `n8n/README.md`.

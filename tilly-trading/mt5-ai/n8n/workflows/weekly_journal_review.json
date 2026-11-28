@@ -1,0 +1,241 @@
+{
+  "name": "MT5 weekly journal review (AI)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 18 * * 0"
+            }
+          ]
+        }
+      },
+      "id": "f3309441-c872-54be-9381-17b121c01230",
+      "name": "Sundays 18:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:8765/journal",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "cf93cc65-76ed-5bda-b9ea-b5315360921c",
+      "name": "GET journal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "mt5-ai token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:8765/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "0b45b470-6177-57e4-8966-ef317178e6e1",
+      "name": "GET status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "mt5-ai token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Change MODEL to one your Anthropic key can use. The rules below are the agent's hard limits (see n8n/prompts).\nconst MODEL = 'claude-sonnet-5-5';\nconst SYSTEM = `# Journal analyst (agent prompt)\n\nUsed by \\`weekly_journal_review.json\\`. Provider-agnostic text.\n\n**Role.** Read a trading journal summary and describe what it shows, honestly.\n\n**Rules (hard):**\n- Use ONLY the numbers in the data you are given. Never invent trades, prices or statistics.\n- If fewer than 30 closed trades, say the sample is too small to conclude anything, and say which numbers are just noise.\n- Never recommend a larger position size, higher risk, more trades, or trading to win back a loss.\n- Never propose a specific trade, direction, entry, stop or target.\n- You may only suggest things that REDUCE risk or improve discipline: smaller size, fewer trades, stopping for the day after losses, keeping tags consistent, waiting for the sample to grow.\n- Say plainly when a tag or setup looks bad, and when \"looks good\" could be luck (many tags means one will look good by chance).\n- 250 words or fewer. Plain language. End with at most three short suggestions.\n\n**Input:** JSON with the journal (\\`overall\\` and \\`by_tag\\`: trades, win_rate, mean_r, mean_r_ci95, reading), today's state, and the account mode.\n`;\nconst USER = JSON.stringify({ journal: $('GET journal').first().json, status: $('GET status').first().json });\nreturn [{ json: { model: MODEL, system: SYSTEM, user: USER } }];\n"
+      },
+      "id": "7ba0e3e2-0ced-5c69-8c8c-cdaac4131124",
+      "name": "Build prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $json.model, max_tokens: 900, system: $json.system, messages: [{ role: 'user', content: $json.user }] }) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "c0c3bbbd-e81f-538d-af6e-69f7dc8d6283",
+      "name": "Ask the AI (Anthropic)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "anthropic key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst blocks = $json.content || [];\nconst text = blocks.map(b => b.text || '').join('').trim();\nreturn [{ json: { text: '\ud83e\udde0 ' + (text || '(the AI returned no text)') } }];\n"
+      },
+      "id": "5b87c0e8-d0ae-5851-b6f6-8c313b16dc22",
+      "name": "Extract text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8765/notify",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}",
+        "options": {}
+      },
+      "id": "3012491e-8fbe-547b-b209-5727bfc8db2f",
+      "name": "POST notify to Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "mt5-ai token"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Sundays 18:00": {
+      "main": [
+        [
+          {
+            "node": "GET journal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET journal": {
+      "main": [
+        [
+          {
+            "node": "GET status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET status": {
+      "main": [
+        [
+          {
+            "node": "Build prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build prompt": {
+      "main": [
+        [
+          {
+            "node": "Ask the AI (Anthropic)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask the AI (Anthropic)": {
+      "main": [
+        [
+          {
+            "node": "Extract text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract text": {
+      "main": [
+        [
+          {
+            "node": "POST notify to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "note": "Agent that describes your journal. It can only inform; it has no access to any order endpoint."
+  }
+}
